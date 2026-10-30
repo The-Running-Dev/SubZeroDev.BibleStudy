@@ -9,11 +9,14 @@ import { createPool } from '../platform/db.ts';
 import { log } from '../platform/log.ts';
 import { migrate } from '../platform/migrate.ts';
 import { deriveKey } from '../platform/secrets.ts';
+import { recoverSessions } from '../study/sessions.ts';
 import { buildApp } from './app.ts';
 
 const config = loadConfig();
 const db = createPool(config.databaseUrl);
 await migrate(db);
+// DOD-11: playback that was running when the process stopped resumes as paused, at its derived position.
+await recoverSessions({ db, clock: systemClock, mediaDir: config.mediaDir });
 
 const sealKey = deriveKey(config.appSecret, 'email-job-secrets');
 const transport = createSmtpTransport(config.smtpUrl, config.mailFrom);

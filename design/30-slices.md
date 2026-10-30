@@ -98,7 +98,7 @@ Acceptance:
 Out of scope: emailing invitations (never in v1); schedule editing (S10).
 
 ## S5 — Play narration together
-Status: todo
+Status: done
 Delivers: Any member can start or join the study, and everyone hears the same narration at the same point. Anyone can play, pause, seek, change passage, narrator or rate, and everyone sees who paused. Late joiners, refreshes and dropped connections catch up without replaying anything.
 Touches: study (StudySession, PlaybackState, SessionCommand, Presence, `/ws`, `startOrJoinSession`, `driftReport`), client live and player (clock sync, drift correction, manual verse marker)
 Depends on: S3, S4

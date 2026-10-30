@@ -8,6 +8,18 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-30 — S5: one shared PlaybackState, changed only by revisioned commands
+- **Context:** S5 needs every member's phone to play the same narration at the same point, let anyone change it, and survive late joins, dropped connections and server restarts without a client replaying stale changes.
+- **Chosen:** the server holds one `study_sessions` row per active session (a partial unique index makes concurrent starts converge on it) carrying the PlaybackState. A command names the revision it saw. `pause` always applies; any other command on a stale revision is `rejected_stale` and answered with the current state. Every command is recorded in `session_commands` by its id, so a resend returns the first outcome. Clients never queue commands: one sent while disconnected is refused in the UI, and a reconnect starts from a snapshot.
+- **Chosen:** playing state is an anchor (position, server time, rate); every client derives its target from its estimate of the server clock (the lowest-latency of the last eight pings) and corrects locally: within 40 ms nothing, up to 1 s a ±5 % rate nudge, beyond that a seek. Clients report drift every 5 s once ready; the drift report is the percentiles of those samples.
+- **Chosen:** a PlaybackState also carries the chosen `recording` (media URL, duration, timing), so a client needs no second request to play it. A playing session past its range end reads as paused with `range_end`.
+- **Chosen:** the starter has no special role. The last connection leaving starts a 20 s grace; then the session pauses with `room_empty`. On start-up the server pauses every playing session at its derived position with `server_restart`. A server shutting down starts no grace timers.
+- **Chosen:** with CSB shared, the session is `manual`: no audio, a shared `manualVerse` any member can set, and switching back to BSB starts the narration at that verse. The CSB text falls back to BSB with a notice until S13 licenses it.
+- **Chosen:** routes beyond the design: `GET /api/groups/:groupId/session` (the active session, so a client can offer Join) and `GET …/session/:sessionId/drift-report`. The `/ws` upgrade checks `Origin` and allows 8 connections per user.
+- **Rejected:** a host or leader client that owns the clock. Its leaving or sleeping phone would stall everyone; the server is the one place that is always up.
+- **Rejected:** last-writer-wins without revisions. Two members pressing seek at once would flip everyone between positions; a stale `pause` is the one change safe to apply late.
+- **Rejected:** replaying a client's offline commands on reconnect. Its view was stale while offline, so the changes could undo what others did meanwhile.
+
 ### 2026-10-30 — S4: the invitation travels with the login code, and removal closes the member's socket
 - **Context:** S4.6 needs the invitation to survive the code step, including a reload when the member switches to the mail app, and a code typed on another device. S4.5 needs a removed member's live connection to end at once, not on its next message.
 - **Chosen:** the client takes the token from `/join/<token>`, keeps it in memory and `sessionStorage` (`bs_invitation`), and replaces the address with `/` so the token stays out of history. The sign-in step (email, time of request) is kept in `sessionStorage` too, so a reload returns to the code step. The token is sent with both the code request and the verification. The code request stores the invitation's id on the `login_codes` row, without checking it, so a request never reveals whether a link is live; the verification accepts it, which also covers a code typed on a device that never saw the link.

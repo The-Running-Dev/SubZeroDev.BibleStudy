@@ -6,6 +6,7 @@ import { clearInvitation, invalidInvitationMessage, pendingInvitation } from './
 import { ProfileForm } from './ProfileForm.tsx';
 import { Reader } from './Reader.tsx';
 import { SignIn } from './SignIn.tsx';
+import { Study } from './Study.tsx';
 
 type State =
   | { kind: 'loading' }
@@ -74,12 +75,13 @@ export function App() {
   }
 }
 
-// Home is the reader; the account sits behind a menu so the text keeps the screen.
+// Home is the reader, or the group's study; the account sits behind a menu so the text keeps the screen.
 function Home(props: { profile: Profile; notice: string | null; onChange: (profile: Profile) => void; onSignedOut: () => void }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [groups, setGroups] = useState<GroupSummary[] | null>(null);
   const [showGroup, setShowGroup] = useState(false);
+  const [studying, setStudying] = useState(false);
 
   useEffect(() => {
     api
@@ -100,6 +102,11 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
         <button type="button" className="link" aria-expanded={showGroup} disabled={groups === null} onClick={() => setShowGroup(!showGroup)}>
           {group?.name ?? 'Group'}
         </button>
+        {group && (
+          <button type="button" className="link" aria-pressed={studying} onClick={() => setStudying(!studying)}>
+            {studying ? 'Read alone' : 'Study'}
+          </button>
+        )}
         <button type="button" className="link account-toggle" aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {props.profile.displayName}
         </button>
@@ -136,7 +143,7 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
           </button>
         </section>
       )}
-      <Reader />
+      {studying && group ? <Study groupId={group.id} /> : <Reader />}
     </div>
   );
 }

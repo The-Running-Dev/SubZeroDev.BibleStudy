@@ -46,3 +46,9 @@ export async function authenticate(db: Queryable, clock: Clock, cookieToken: str
 export async function revokeSession(db: Queryable, clock: Clock, sessionId: string): Promise<void> {
   await db.query('UPDATE auth_sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL', [sessionId, clock.now()]);
 }
+
+// Whether a session found at connect time still holds, for long-lived channels that authenticated once.
+export async function sessionIsValid(db: Queryable, clock: Clock, sessionId: string): Promise<boolean> {
+  const found = await db.query('SELECT 1 FROM auth_sessions WHERE id = $1 AND revoked_at IS NULL AND expires_at > $2', [sessionId, clock.now()]);
+  return Boolean(found.rowCount);
+}
