@@ -90,13 +90,15 @@ function bounds(draft: Pick<Draft, 'recording' | 'passage'>) {
 // that is not written back, so it does not change the revision.
 async function effectiveDraft(q: Queryable, mediaDir: string, row: SessionRow, nowMs: number): Promise<Draft> {
   const passage: PassageRef = { bookId: row.book_id, chapter: row.chapter, startVerse: row.start_verse, endVerse: row.end_verse };
+  // A session waiting on narration (no recording yet) takes it as soon as it is imported; one already
+  // following a recording keeps it, and reads as having none if it disappears.
   const recording =
-    row.recording_id && row.narrator_id ? await resolveRecording({ db: q, mediaDir }, row.translation_id, passage, row.narrator_id) : null;
+    row.mode === 'narration' && row.narrator_id ? await resolveRecording({ db: q, mediaDir }, row.translation_id, passage, row.narrator_id) : null;
   const draft: Draft = {
     passage,
     translationId: row.translation_id,
     narratorId: row.narrator_id,
-    recording: recording && recording.id === row.recording_id ? recording : null,
+    recording: recording && (row.recording_id === null || recording.id === row.recording_id) ? recording : null,
     mode: row.mode,
     status: row.play_status,
     positionSeconds: row.position_seconds,
@@ -507,10 +509,11 @@ export async function recoverSessions(deps: Omit<StudyDeps, 'onAudioQueued'>): P
 }
 
 // The room emptied: pause at the derived position. Returns the new state, or null when nothing changed.
-export async function pauseForEmptyRoom(deps: StudyDeps, sessionId: string): Promise<PlaybackState | null> {
+// `occupied` is asked again under the row lock, so a member who rejoined during the grace keeps playing.
+export async function pauseForEmptyRoom(deps: StudyDeps, sessionId: string, occupied: () => boolean = () => false): Promise<PlaybackState | null> {
   return withTransaction(deps.db, async (tx) => {
     const row = await loadSession(tx, sessionId, true);
-    if (!row || row.status !== 'active' || row.play_status !== 'playing') return null;
+    if (!row || row.status !== 'active' || row.play_status !== 'playing' || occupied()) return null;
     const now = deps.clock.now();
     const draft = await effectiveDraft(tx, deps.mediaDir, row, now.getTime());
     if (draft.status === 'playing') {

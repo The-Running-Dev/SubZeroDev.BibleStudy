@@ -10,6 +10,7 @@ import type { AoBook, AoChapter } from '../../src/server/content/aolab.ts';
 import { createAoLabSource } from '../../src/server/content/aolab.ts';
 import { runImport } from '../../src/server/content/import.ts';
 import { importAudio } from '../../src/server/content/narration.ts';
+import { pauseForEmptyRoom } from '../../src/server/study/sessions.ts';
 import type { Command, PlaybackState, ServerMessage } from '../../src/shared/api.ts';
 import type { Harness } from '../support/harness.ts';
 import { clearMailbox, databaseUrl, ownerEmail, signIn, smtpUrl, startHarness, truncateAll } from '../support/harness.ts';
@@ -173,6 +174,26 @@ async function sessionRow(sessionId: string) {
 }
 
 describe('starting and joining', () => {
+  test('a session started before its narration was imported picks the recording up once it arrives', async () => {
+    const { owner, groupId } = await ownerAndMember();
+    await h.db.query('DELETE FROM recordings');
+    const { sessionId, state } = await start(owner.cookie, groupId);
+    assert.equal(state.mode, 'narration');
+    assert.equal(state.recording, null);
+    const olive = await connect(owner.cookie);
+    assert.equal((await olive.join(sessionId)).state.recording, null);
+
+    const source = createAoLabSource({ baseUrl: fixtureUrl, sleep: async () => {} });
+    assert.equal((await importAudio({ db: h.db, clock: h.clock, source, mediaDir: h.config.mediaDir }, { translationId: 'BSB', bookId: 'ROM', chapters: [1] })).status, 'succeeded');
+    const snapshot = await olive.join(sessionId);
+    assert.ok(snapshot.state.recording, 'the next snapshot carries the recording');
+    assert.equal(snapshot.state.revision, state.revision, 'picking it up is not a change');
+    const played = await olive.command(sessionId, snapshot.state.revision, { kind: 'play' });
+    assert.equal(played.outcome, 'applied', played.reason);
+    assert.equal(played.state.recordingId, snapshot.state.recording.id);
+    await closeClient(olive);
+  });
+
   test('S5.1 two members starting at once end up in one active session', async () => {
     const { owner, member, groupId } = await ownerAndMember();
     for (let round = 0; round < 5; round++) {
@@ -362,6 +383,21 @@ describe('the room', () => {
     assert.equal(row.play_status, 'paused');
     assert.equal(row.paused_reason, 'room_empty');
     assert.equal(row.position_seconds, 7);
+  });
+
+  test('an empty-room pause is skipped when someone rejoined before it committed', async () => {
+    const { owner, groupId } = await ownerAndMember();
+    const { sessionId } = await start(owner.cookie, groupId);
+    const olive = await connect(owner.cookie);
+    await olive.join(sessionId);
+    assert.equal((await olive.command(sessionId, 0, { kind: 'play' })).outcome, 'applied');
+    const study = { db: h.db, clock: h.clock, mediaDir: h.config.mediaDir };
+    assert.equal(await pauseForEmptyRoom(study, sessionId, () => true), null);
+    assert.equal((await sessionRow(sessionId)).play_status, 'playing');
+    const paused = await pauseForEmptyRoom(study, sessionId, () => false);
+    assert.equal(paused?.status, 'paused');
+    assert.equal(paused?.pausedReason, 'room_empty');
+    await closeClient(olive);
   });
 
   test('S5.6 a client that reconnects gets a snapshot of what changed meanwhile', async () => {

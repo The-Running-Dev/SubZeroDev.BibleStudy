@@ -12,6 +12,8 @@ export interface Live {
   drift(sessionId: string, driftMs: number, ready: boolean): void;
   // The server's clock now, in ms, from the lowest-latency of the recent pings.
   serverNow(): number;
+  // True once a pong has measured the server clock.
+  clockReady(): boolean;
   close(): void;
 }
 
@@ -114,6 +116,7 @@ export function connectLive(handlers: { onMessage: (message: ServerMessage) => v
       send({ t: 'drift', sessionId: id, driftMs, ready });
     },
     serverNow: () => now() + offset,
+    clockReady: () => samples.length > 0,
     close() {
       stopped = true;
       clearTimeout(pingTimer);

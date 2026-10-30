@@ -68,9 +68,12 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
   const study: StudyDeps = { db: deps.db, clock: deps.clock, mediaDir: deps.config.mediaDir, onAudioQueued: deps.onAudioQueued };
 
   hub.onRoomEmpty((sessionId) => {
-    pauseForEmptyRoom(study, sessionId)
+    pauseForEmptyRoom(study, sessionId, () => hub.presence(sessionId).length > 0)
       .then((state) => {
-        if (state) log('info', 'paused empty room', { sessionId, positionSeconds: state.positionSeconds });
+        if (!state) return;
+        log('info', 'paused empty room', { sessionId, positionSeconds: state.positionSeconds });
+        // Anyone who joined while the pause was committing hears about it.
+        hub.broadcast(sessionId, { t: 'state', state });
       })
       .catch((error: Error) => log('error', 'could not pause empty room', { sessionId, error: error.message }));
   });
@@ -173,8 +176,11 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
               return reply({ t: 'pong', clientSentMs: message.clientSentMs, serverMs: deps.clock.now().getTime() });
             case 'join': {
               if (!(await stillSignedIn())) return;
-              const { state } = await sessionForMember(study, auth.userId, message.sessionId);
-              hub.join(connection, state.sessionId);
+              const { state: checked } = await sessionForMember(study, auth.userId, message.sessionId);
+              // Join the room before reading the snapshot, so a change committed in between reaches this connection
+              // as a broadcast instead of being lost.
+              hub.join(connection, checked.sessionId);
+              const { state } = await sessionForMember(study, auth.userId, checked.sessionId);
               return reply({ t: 'snapshot', state, presence: hub.presence(state.sessionId) });
             }
             case 'command': {

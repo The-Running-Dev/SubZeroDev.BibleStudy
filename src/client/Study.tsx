@@ -96,6 +96,8 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
   const [blocked, setBlocked] = useState(false);
   const [verse, setVerse] = useState<number | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
+  // Re-renders the position label and slider while playing.
+  const [, setNow] = useState(0);
   const live = useRef<Live | null>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const stateRef = useRef(state);
@@ -104,23 +106,24 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
   const blockedRef = useRef(blocked);
   blockedRef.current = blocked;
 
-  // A state is taken only when it is newer than the one shown; a snapshot always replaces it.
-  const accept = useCallback((next: PlaybackState, always = false) => {
-    setState((previous) => (always || next.revision >= previous.revision ? next : previous));
+  // A state is taken only when it is at least as new as the one shown, whether it came as a snapshot, a broadcast
+  // or a command's result; revisions only grow within a session.
+  const accept = useCallback((next: PlaybackState) => {
+    setState((previous) => (next.sessionId !== previous.sessionId || next.revision >= previous.revision ? next : previous));
   }, []);
 
   useEffect(() => {
     const onMessage = (message: ServerMessage) => {
       switch (message.t) {
         case 'snapshot':
-          accept(message.state, true);
+          accept(message.state);
           setPresence(message.presence);
           return;
         case 'state':
           accept(message.state);
           return;
         case 'result':
-          accept(message.state, true);
+          accept(message.state);
           if (message.outcome === 'rejected_stale') setNotice('Someone else changed it first — showing the latest.');
           else if (message.outcome === 'rejected_invalid') setNotice(message.reason ?? 'That change was not allowed.');
           return;
@@ -154,7 +157,9 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
         setVerse(current.manualVerse);
         return;
       }
-      if (!element || !channel) return;
+      // Until the first pong the server clock is unknown; following it would start at the wrong second and jump.
+      if (!element || !channel || !channel.clockReady()) return;
+      if (current.status === 'playing') setNow(channel.serverNow());
       lastDrift.current = blockedRef.current ? null : syncStep(element, current, channel.serverNow(), () => setBlocked(true));
       const timing = current.recording?.timing;
       setVerse(timing && (current.status === 'playing' || element.currentTime > 0) ? verseAtSeconds(timing, element.currentTime) : null);
@@ -194,10 +199,20 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
     setNotice(id ? null : 'Not connected — your change was not sent.');
   }
 
+  // The shared position now, for seeks relative to what is being heard.
+  function positionNow(): number {
+    return live.current ? targetSeconds(stateRef.current, live.current.serverNow()) : stateRef.current.positionSeconds;
+  }
+
   // The tap that lets the browser start audio; it also starts this client at the shared position.
   function joinAudio() {
     const element = audio.current;
     if (!element || !live.current) return;
+    if (stateRef.current.status !== 'playing') {
+      // The tap itself unlocks audio; a paused room starts nothing.
+      setBlocked(false);
+      return;
+    }
     element.currentTime = targetSeconds(stateRef.current, live.current.serverNow());
     element
       .play()
@@ -227,10 +242,10 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
                 <button type="button" onClick={() => send({ kind: state.status === 'playing' ? 'pause' : 'play' })}>
                   {state.status === 'playing' ? 'Pause' : 'Play'}
                 </button>
-                <button type="button" className="secondary" aria-label="Back 10 seconds" onClick={() => send({ kind: 'seek', positionSeconds: position - 10 })}>
+                <button type="button" className="secondary" aria-label="Back 10 seconds" onClick={() => send({ kind: 'seek', positionSeconds: positionNow() - 10 })}>
                   −10 s
                 </button>
-                <button type="button" className="secondary" aria-label="Forward 10 seconds" onClick={() => send({ kind: 'seek', positionSeconds: position + 10 })}>
+                <button type="button" className="secondary" aria-label="Forward 10 seconds" onClick={() => send({ kind: 'seek', positionSeconds: positionNow() + 10 })}>
                   +10 s
                 </button>
                 <span className="player-label" data-testid="study-position">
