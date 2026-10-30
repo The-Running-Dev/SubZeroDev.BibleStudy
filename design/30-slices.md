@@ -84,7 +84,7 @@ Acceptance:
 Out of scope: shared playback (S5); downloads for offline (S14).
 
 ## S4 — Create the group and invite members
-Status: todo
+Status: done
 Delivers: The owner sets up the private group and sends each member a private link. The member signs in through it and lands in the group. Only the owner can revoke links or remove members.
 Touches: groups (Group, Membership, Invitation, `requireMember`, `requireOwner`, `acceptInvitation`), identity (invitation carried through sign-in), client group screens
 Depends on: S1

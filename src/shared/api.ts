@@ -31,6 +31,8 @@ export type ErrorCode =
   | 'translation_unavailable'
   | 'chapter_not_found'
   | 'upstream_failed'
+  | 'not_member'
+  | 'not_owner'
   | 'internal';
 
 export interface ApiError {
@@ -113,3 +115,50 @@ export interface RecordingsResponse {
   preparing: string[];
   failed: { narratorId: string; reason: string }[];
 }
+
+export type MemberRole = 'owner' | 'member';
+
+export interface GroupSummary {
+  id: Uuid;
+  name: string;
+  role: MemberRole;
+}
+
+export interface GroupView {
+  id: Uuid;
+  name: string;
+  role: MemberRole;
+  members: { userId: Uuid; displayName: string; role: MemberRole }[];
+  sharedTranslationId: TranslationId;
+  narratorId: string | null;
+  rate: number;
+  // ISO weekday (1 = Monday), HH:MM in `timeZone`.
+  schedule: { weekday: number; localTime: string; timeZone: IanaZone };
+}
+
+export interface CreatedInvitation {
+  id: Uuid;
+  link: string;
+  expiresAt: IsoInstant;
+}
+
+export interface InvitationView {
+  id: Uuid;
+  createdAt: IsoInstant;
+  expiresAt: IsoInstant;
+  state: 'open' | 'accepted' | 'revoked' | 'expired';
+}
+
+// POST /api/invitations/accept, for a member who is already signed in when they open a link.
+export interface AcceptInvitationResponse {
+  joinedGroupId: Uuid | null;
+  invitation: 'accepted' | 'invalid';
+}
+
+// The realtime channel (/ws). Later slices add the study messages.
+export type ClientMessage = { t: 'ping'; clientSentMs: number };
+
+export type ServerMessage = { t: 'pong'; clientSentMs: number; serverMs: number } | { t: 'error'; error: ErrorCode; retryable: boolean };
+
+// Close code sent when the server ends a connection because its user lost access to the group.
+export const closeNotMember = 4403;

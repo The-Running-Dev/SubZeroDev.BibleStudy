@@ -19,11 +19,14 @@ import { createPool } from '../../src/server/platform/db.ts';
 import type { Db } from '../../src/server/platform/db.ts';
 import { migrate } from '../../src/server/platform/migrate.ts';
 import { deriveKey } from '../../src/server/platform/secrets.ts';
+import { createRealtimeHub } from '../../src/server/study/realtime.ts';
+import type { RealtimeHub } from '../../src/server/study/realtime.ts';
 import { buildApp } from '../../src/server/web/app.ts';
 
 export const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://biblestudy:biblestudy@localhost:55432/biblestudy';
 export const smtpUrl = process.env.TEST_SMTP_URL ?? 'smtp://localhost:1025';
 export const mailpitUrl = process.env.TEST_MAILPIT_URL ?? 'http://localhost:8025';
+export const ownerEmail = 'owner@example.test';
 
 export interface Harness {
   app: FastifyInstance;
@@ -33,6 +36,7 @@ export interface Harness {
   worker: MailWorker;
   audioWorker: AudioWorker;
   transport: MailTransport;
+  hub: RealtimeHub;
   close(): Promise<void>;
 }
 
@@ -61,6 +65,7 @@ export async function startHarness(env: Record<string, string> = {}, options: { 
     SMTP_URL: smtpUrl,
     MAIL_FROM: 'Bible Study <no-reply@example.test>',
     PUBLIC_URL: 'http://localhost:3000',
+    OWNER_EMAIL: ownerEmail,
     BUILD_ID: 'test-build',
     STATIC_DIR: 'does-not-exist',
     ...env,
@@ -73,6 +78,7 @@ export async function startHarness(env: Record<string, string> = {}, options: { 
   const worker = createMailWorker({ db, clock, transport, sealKey });
   const source = options.source ?? createAoLabSource({ baseUrl: config.aolabBaseUrl });
   const audioWorker = createAudioWorker({ db, clock, source, mediaDir: config.mediaDir });
+  const hub = createRealtimeHub();
   const app = await buildApp({
     config,
     db,
@@ -80,6 +86,7 @@ export async function startHarness(env: Record<string, string> = {}, options: { 
     outbox: createOutbox({ clock, sealKey }),
     codePepper: deriveKey(config.appSecret, 'login-code-pepper'),
     onEmailQueued: () => worker.notify(),
+    hub,
   });
   return {
     app,
@@ -89,6 +96,7 @@ export async function startHarness(env: Record<string, string> = {}, options: { 
     worker,
     audioWorker,
     transport,
+    hub,
     async close() {
       await app.close();
       transport.close();
@@ -148,17 +156,23 @@ export async function waitForCode(address: string, count: number, timeoutMs = 10
 }
 
 // Requests a code, delivers it through the real worker and Mailpit, and returns it.
-export async function requestAndReceiveCode(h: Harness, email: string, ip = '203.0.113.10'): Promise<string> {
+export async function requestAndReceiveCode(h: Harness, email: string, ip = '203.0.113.10', invitationToken?: string): Promise<string> {
   const before = (await messagesTo(email)).length;
-  const response = await h.app.inject({ method: 'POST', url: '/api/auth/code', payload: { email }, remoteAddress: ip });
+  const response = await h.app.inject({ method: 'POST', url: '/api/auth/code', payload: { email, invitationToken }, remoteAddress: ip });
   if (response.statusCode !== 200) throw new Error(`code request failed: ${response.statusCode} ${response.body}`);
   await h.worker.runOnce();
   return waitForCode(email, before + 1);
 }
 
-export async function signIn(h: Harness, email: string): Promise<{ cookie: string; userId: string }> {
-  const code = await requestAndReceiveCode(h, email);
+// `invitationToken` goes with the code request only, as when the code is typed on another device.
+export async function signIn(
+  h: Harness,
+  email: string,
+  invitationToken?: string,
+): Promise<{ cookie: string; userId: string; joinedGroupId: string | null; invitation: 'accepted' | 'invalid' | 'none' }> {
+  const code = await requestAndReceiveCode(h, email, '203.0.113.10', invitationToken);
   const response = await h.app.inject({ method: 'POST', url: '/api/auth/verify', payload: { email, code } });
   if (response.statusCode !== 200) throw new Error(`verify failed: ${response.statusCode} ${response.body}`);
-  return { cookie: cookieFrom(response), userId: response.json().user.id };
+  const body = response.json();
+  return { cookie: cookieFrom(response), userId: body.user.id, joinedGroupId: body.joinedGroupId, invitation: body.invitation };
 }

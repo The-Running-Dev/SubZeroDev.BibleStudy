@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import type { VerifyCodeResponse } from '../../shared/api.ts';
+import type { AcceptInvitationResponse, VerifyCodeResponse } from '../../shared/api.ts';
+import { acceptInvitation } from '../groups/groups.ts';
 import type { IdentityDeps } from '../identity/codes.ts';
 import { loginCodeStatus, requestLoginCode, verifyLoginCode } from '../identity/codes.ts';
 import { getProfile, updateProfile } from '../identity/profile.ts';
 import { revokeSession } from '../identity/sessions.ts';
+import { withTransaction } from '../platform/db.ts';
 import type { AppDeps } from './app.ts';
 import { requireAuth } from './auth.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
@@ -17,21 +19,21 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps): voi
     outbox: deps.outbox,
     codePepper: deps.codePepper,
     publicUrl: deps.config.publicUrl,
+    ownerEmail: deps.config.ownerEmail,
   };
 
   app.post('/api/auth/code', async (request) => {
     const body = request.body as Body;
-    const result = await requestLoginCode(identity, { email: body?.email, ip: request.ip });
+    const result = await requestLoginCode(identity, { email: body?.email, ip: request.ip, invitationToken: body?.invitationToken });
     deps.onEmailQueued?.();
     return result;
   });
 
   app.post('/api/auth/verify', async (request, reply): Promise<VerifyCodeResponse> => {
     const body = request.body as Body;
-    const session = await verifyLoginCode(identity, { email: body?.email, code: body?.code });
+    const session = await verifyLoginCode(identity, { email: body?.email, code: body?.code, invitationToken: body?.invitationToken });
     setSessionCookie(reply, deps.config, session.token, session.expiresAt);
-    // Invitations arrive with S4; until then every sign-in reports none.
-    return { user: session.user, joinedGroupId: null, invitation: 'none' };
+    return { user: session.user, joinedGroupId: session.joinedGroupId, invitation: session.invitation };
   });
 
   app.get('/api/auth/code-status', async (request) => {
@@ -43,6 +45,14 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps): voi
     await revokeSession(deps.db, deps.clock, requireAuth(request).sessionId);
     reply.clearCookie(sessionCookie, { path: '/' });
     return reply.status(204).send();
+  });
+
+  // A link opened by someone already signed in joins without a new code.
+  app.post('/api/invitations/accept', async (request): Promise<AcceptInvitationResponse> => {
+    const userId = requireAuth(request).userId;
+    const token = (request.body as Body)?.token;
+    const accepted = await withTransaction(deps.db, (tx) => acceptInvitation(tx, deps.clock, userId, token));
+    return 'groupId' in accepted ? { joinedGroupId: accepted.groupId, invitation: 'accepted' } : { joinedGroupId: null, invitation: 'invalid' };
   });
 
   app.get('/api/me', async (request) => getProfile(deps.db, requireAuth(request).userId));

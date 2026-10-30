@@ -1,5 +1,10 @@
 import type {
+  AcceptInvitationResponse,
   ApiError,
+  CreatedInvitation,
+  GroupSummary,
+  GroupView,
+  InvitationView,
   ChapterView,
   RecordingsResponse,
   CodeDelivery,
@@ -38,12 +43,20 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 }
 
 export const api = {
-  requestCode: (email: string) => call<RequestCodeResponse>('POST', '/api/auth/code', { email }),
-  verifyCode: (email: string, code: string) => call<VerifyCodeResponse>('POST', '/api/auth/verify', { email, code }),
+  requestCode: (email: string, invitationToken?: string) => call<RequestCodeResponse>('POST', '/api/auth/code', { email, invitationToken }),
+  verifyCode: (email: string, code: string, invitationToken?: string) =>
+    call<VerifyCodeResponse>('POST', '/api/auth/verify', { email, code, invitationToken }),
   codeStatus: (email: string) => call<{ delivery: CodeDelivery }>('GET', `/api/auth/code-status?email=${encodeURIComponent(email)}`),
   logout: () => call<void>('POST', '/api/auth/logout'),
   me: () => call<Profile>('GET', '/api/me'),
   updateMe: (patch: ProfilePatch) => call<Profile>('PATCH', '/api/me', patch),
+  acceptInvitation: (token: string) => call<AcceptInvitationResponse>('POST', '/api/invitations/accept', { token }),
+  groups: () => call<GroupSummary[]>('GET', '/api/groups'),
+  group: (groupId: string) => call<GroupView>('GET', `/api/groups/${groupId}`),
+  createInvitation: (groupId: string) => call<CreatedInvitation>('POST', `/api/groups/${groupId}/invitations`),
+  invitations: (groupId: string) => call<InvitationView[]>('GET', `/api/groups/${groupId}/invitations`),
+  revokeInvitation: (groupId: string, invitationId: string) => call<void>('DELETE', `/api/groups/${groupId}/invitations/${invitationId}`),
+  removeMember: (groupId: string, userId: string) => call<void>('DELETE', `/api/groups/${groupId}/members/${userId}`),
   translations: () => call<TranslationView[]>('GET', '/api/content/translations'),
   chapter: (translationId: TranslationId, bookId: string, chapter: number) => call<ChapterView>('GET', `/api/content/${translationId}/${bookId}/${chapter}`),
   // 202 while a recording is being prepared; the body lists what is ready so far.

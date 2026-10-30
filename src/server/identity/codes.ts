@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import type { CodeDelivery, Profile } from '../../shared/api.ts';
+import { acceptInvitation, acceptInvitationById, bootstrapOwner, invitationIdForToken } from '../groups/groups.ts';
 import type { Outbox } from '../mail/outbox.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Db } from '../platform/db.ts';
@@ -26,6 +27,8 @@ export interface IdentityDeps {
   outbox: Outbox;
   codePepper: Buffer;
   publicUrl: string;
+  // The address whose first sign-in creates the group (OWNER_EMAIL), lower-cased.
+  ownerEmail: string | null;
 }
 
 export function generateCode(): string {
@@ -52,9 +55,12 @@ function rateLimited(oldest: Date, now: Date): AppError {
 
 export async function requestLoginCode(
   deps: IdentityDeps,
-  input: { email: unknown; ip: string },
+  input: { email: unknown; ip: string; invitationToken?: unknown },
 ): Promise<{ sent: 'queued'; codeExpiresAt: string }> {
   const email = normalizeEmail(input.email);
+  // Kept with the code, so the invitation still applies when the code is typed on another device.
+  // Its validity is checked only at verification, so a request never reveals whether a link is live.
+  const invitationId = await invitationIdForToken(deps.db, input.invitationToken);
   const now = deps.clock.now();
   const since = new Date(now.getTime() - hourMs);
 
@@ -90,8 +96,8 @@ export async function requestLoginCode(
       secrets: { code },
     });
     await tx.query(
-      `INSERT INTO login_codes (id, email, code_hash, request_ip, created_at, expires_at, email_job_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [codeId, email, hashCode(deps.codePepper, codeId, code), input.ip, now, expiresAt, jobId],
+      `INSERT INTO login_codes (id, email, code_hash, request_ip, created_at, expires_at, email_job_id, invitation_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [codeId, email, hashCode(deps.codePepper, codeId, code), input.ip, now, expiresAt, jobId, invitationId],
     );
     return { sent: 'queued' as const, codeExpiresAt: expiresAt.toISOString() };
   });
@@ -103,16 +109,20 @@ interface CodeRow {
   expires_at: Date;
   consumed_at: Date | null;
   failed_attempts: number;
+  invitation_id: string | null;
 }
 
+type InvitationOutcome = { joinedGroupId: string | null; invitation: 'accepted' | 'invalid' | 'none' };
+type Verified = { user: Profile; token: string; sessionId: string; expiresAt: Date } & InvitationOutcome;
+
 type VerifyOutcome =
-  | { kind: 'ok'; user: Profile; token: string; sessionId: string; expiresAt: Date }
+  | ({ kind: 'ok' } & Verified)
   | { kind: 'error'; error: AppError };
 
 export async function verifyLoginCode(
   deps: IdentityDeps,
-  input: { email: unknown; code: unknown },
-): Promise<{ user: Profile; token: string; sessionId: string; expiresAt: Date }> {
+  input: { email: unknown; code: unknown; invitationToken?: unknown },
+): Promise<Verified> {
   const email = normalizeEmail(input.email);
   const code = typeof input.code === 'string' ? input.code.trim() : '';
   const now = deps.clock.now();
@@ -121,7 +131,7 @@ export async function verifyLoginCode(
   // Failed attempts are committed even though the request fails, so the outcome is returned, not thrown.
   const outcome = await withTransaction<VerifyOutcome>(deps.db, async (tx) => {
     const codes = await tx.query<CodeRow>(
-      `SELECT id, code_hash, expires_at, consumed_at, failed_attempts FROM login_codes
+      `SELECT id, code_hash, expires_at, consumed_at, failed_attempts, invitation_id FROM login_codes
        WHERE lower(email) = $1 ORDER BY created_at DESC LIMIT $2 FOR UPDATE`,
       [email, recentCodesConsidered],
     );
@@ -137,8 +147,20 @@ export async function verifyLoginCode(
          RETURNING id, email, display_name, time_zone, display_translation_id`,
         [uuidv7(now.getTime()), email, email.split('@')[0].slice(0, 60), now],
       );
-      const session = await createSession(tx, deps.clock, user.rows[0].id);
-      return { kind: 'ok', user: toProfile(user.rows[0]), ...session };
+      const profile = toProfile(user.rows[0]);
+      await bootstrapOwner(tx, deps.clock, profile, deps.ownerEmail);
+      // The token the app carried through sign-in wins; the one recorded with the code covers another device.
+      // An invalid invitation still signs the user in, without a membership.
+      let joined: InvitationOutcome = { joinedGroupId: null, invitation: 'none' };
+      if (input.invitationToken !== undefined || open.invitation_id) {
+        const accepted =
+          input.invitationToken !== undefined
+            ? await acceptInvitation(tx, deps.clock, profile.id, input.invitationToken)
+            : await acceptInvitationById(tx, deps.clock, profile.id, open.invitation_id!);
+        joined = 'groupId' in accepted ? { joinedGroupId: accepted.groupId, invitation: 'accepted' } : { joinedGroupId: null, invitation: 'invalid' };
+      }
+      const session = await createSession(tx, deps.clock, profile.id);
+      return { kind: 'ok', user: profile, ...session, ...joined };
     }
 
     // The right code at the wrong time: consumed, superseded, expired or out of attempts.
@@ -154,7 +176,8 @@ export async function verifyLoginCode(
   });
 
   if (outcome.kind === 'error') throw outcome.error;
-  return { user: outcome.user, token: outcome.token, sessionId: outcome.sessionId, expiresAt: outcome.expiresAt };
+  const { user, token, sessionId, expiresAt, joinedGroupId, invitation } = outcome;
+  return { user, token, sessionId, expiresAt, joinedGroupId, invitation };
 }
 
 export async function loginCodeStatus(deps: IdentityDeps, emailInput: unknown): Promise<{ delivery: CodeDelivery }> {

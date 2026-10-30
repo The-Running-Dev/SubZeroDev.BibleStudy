@@ -76,9 +76,56 @@ button:disabled {
   padding: 0 1rem 2rem;
 }
 
+.home-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: max(0.5rem, env(safe-area-inset-top));
+}
+
 .account-toggle {
-  display: block;
-  margin: max(0.5rem, env(safe-area-inset-top)) 0 0 auto;
+  margin-left: auto;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #9ca3af;
+}
+
+.group h2,
+.group h3 {
+  margin: 0.5rem 0 0;
+}
+
+.members,
+.invitations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.members li,
+.invitations li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.invitation-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.invitation-link label {
+  flex: 1 1 16rem;
 }
 
 .account {

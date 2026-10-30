@@ -7,6 +7,8 @@ export interface Config {
   smtpUrl: string;
   mailFrom: string;
   publicUrl: string;
+  // Lower-cased; the first sign-in by this address creates the group with that user as owner.
+  ownerEmail: string | null;
   host: string;
   port: number;
   cookieSecure: boolean;
@@ -54,6 +56,7 @@ export function loadConfig(env: Env = process.env): Config {
     smtpUrl: required('SMTP_URL'),
     mailFrom: env.MAIL_FROM?.trim() || 'Bible Study <no-reply@localhost>',
     publicUrl: (env.PUBLIC_URL?.trim() || 'http://localhost:3000').replace(/\/+$/, ''),
+    ownerEmail: env.OWNER_EMAIL?.trim().toLowerCase() || null,
     host: env.HOST?.trim() || '0.0.0.0',
     port: Number(env.PORT ?? 3000),
     cookieSecure: env.COOKIE_SECURE !== 'false',
@@ -64,6 +67,7 @@ export function loadConfig(env: Env = process.env): Config {
   };
 
   if (config.appSecret && config.appSecret.length < 32) problems.push('APP_SECRET must be at least 32 characters');
+  if (config.ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.ownerEmail)) problems.push('OWNER_EMAIL must be an email address');
   if (!Number.isInteger(config.port) || config.port <= 0) problems.push('PORT must be a positive integer');
   if (problems.length) throw new Error(`Invalid configuration: ${problems.join('; ')}`);
   return config;
