@@ -1,0 +1,23 @@
+# Local services for development and integration tests: `npm run dev:services`.
+# Mailpit catches every email; read them at http://localhost:8025.
+name: biblestudy-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: biblestudy
+      POSTGRES_PASSWORD: biblestudy
+      POSTGRES_DB: biblestudy
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biblestudy"]
+      interval: 2s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "1025:1025"
+      - "8025:8025"

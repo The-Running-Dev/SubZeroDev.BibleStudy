@@ -39,3 +39,9 @@ yarn-debug.log*
 tmp/
 cache/
 .cache/
+
+# Node specific
+node_modules/
+.npm/
+.next/
+out/

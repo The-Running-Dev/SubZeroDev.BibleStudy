@@ -8,6 +8,13 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-30 — S1: email-job secrets are sealed, and every server key derives from one APP_SECRET
+- **Context:** the outbox stores rendered mail before the worker sends it. A login code in plain text in `email_jobs` would let anyone with a database dump sign in as that member for ten minutes.
+- **Chosen:** the job row carries `{{code}}` placeholders and a `sealed_secrets` column (AES-256-GCM). The worker fills the placeholders at send time and nulls the column when the job reaches `sent` or `failed`. This adds an optional `secrets` field to the contract's `enqueueEmail` input. The sealing key and the login-code pepper are HKDF-SHA256 derivations of `APP_SECRET` with distinct purposes, so deployment has one secret to keep. `GET /__build-id` returns `{"buildId": …}` as JSON, so the update check (S14) and the CI container probe parse one shape.
+- **Rejected:** plain-text bodies in the outbox. A backup would leak live codes.
+- **Rejected:** separate `SEAL_KEY` and `CODE_PEPPER` variables. More secrets to rotate, with no isolation gain on a single instance.
+- **Rejected:** a plain-text build id. The client would parse two formats.
+
 ## D-2026-10-30-17 — CI runs a repository text check before any language exists
 - **Context:** the kit's merge tool refuses pull requests that have no checks (`NoChecksConfigured`). Before this, the repository had only Markdown.
 - **Chosen:** a CI job that runs on every pull request, with no paths filter, and checks that tracked text is UTF-8 with LF endings and a final newline, and that relative Markdown links resolve. Language gates are added to the same job when code arrives.
