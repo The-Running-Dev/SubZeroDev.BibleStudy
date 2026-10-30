@@ -34,14 +34,16 @@ export async function resetDatabase(db: Db): Promise<void> {
   await migrate(db);
 }
 
+// Keeps migration-seeded reference rows (translations).
 export async function truncateAll(db: Db): Promise<void> {
   const tables = await db.query<{ tablename: string }>(
-    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`,
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('schema_migrations', 'translations')`,
   );
   if (tables.rowCount) await db.query(`TRUNCATE ${tables.rows.map((t) => `"${t.tablename}"`).join(', ')} CASCADE`);
 }
 
-export async function startHarness(): Promise<Harness> {
+// `env` overrides the test configuration, e.g. STATIC_DIR to serve the built client.
+export async function startHarness(env: Record<string, string> = {}): Promise<Harness> {
   const config = loadConfig({
     DATABASE_URL: databaseUrl,
     APP_SECRET: 'integration-test-secret-0123456789abcdef',
@@ -50,6 +52,7 @@ export async function startHarness(): Promise<Harness> {
     PUBLIC_URL: 'http://localhost:3000',
     BUILD_ID: 'test-build',
     STATIC_DIR: 'does-not-exist',
+    ...env,
   });
   const db = createPool(config.databaseUrl);
   await resetDatabase(db);

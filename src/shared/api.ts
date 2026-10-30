@@ -4,6 +4,19 @@ export type Uuid = string;
 export type IsoInstant = string;
 export type IanaZone = string;
 export type TranslationId = 'BSB' | 'CSB';
+export type BookId = string; // USFM code, e.g. 'ROM'
+
+export interface PassageRef {
+  bookId: BookId;
+  chapter: number;
+  startVerse: number | null;
+  endVerse: number | null;
+}
+
+export type Availability =
+  | { state: 'available' }
+  | { state: 'not_configured'; reason: string }
+  | { state: 'unavailable'; reason: string };
 
 export type ErrorCode =
   | 'invalid_email'
@@ -15,6 +28,9 @@ export type ErrorCode =
   | 'invalid_request'
   | 'not_found'
   | 'unavailable'
+  | 'translation_unavailable'
+  | 'chapter_not_found'
+  | 'upstream_failed'
   | 'internal';
 
 export interface ApiError {
@@ -46,3 +62,33 @@ export interface VerifyCodeResponse {
 export type CodeDelivery = 'queued' | 'sending' | 'sent' | 'failed' | 'none';
 
 export type ProfilePatch = Partial<Pick<Profile, 'displayName' | 'timeZone' | 'displayTranslationId'>>;
+
+export interface TranslationView {
+  id: TranslationId;
+  name: string;
+  copyrightNotice: string;
+  availability: Availability;
+  narration: Availability;
+}
+
+export interface BookView {
+  bookId: BookId;
+  name: string;
+  chapters: number;
+}
+
+export interface ChapterContent {
+  verses: { number: number; text: string }[];
+  headings: { beforeVerse: number; text: string }[];
+  footnotes: { verse: number; text: string }[];
+}
+
+export interface ChapterView extends ChapterContent {
+  translationId: TranslationId;
+  bookId: BookId;
+  chapter: number;
+  verseCount: number;
+  contentSha256: string;
+  expiresAt: IsoInstant | null;
+  fums?: { token: string };
+}

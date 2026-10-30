@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { createOutbox } from '../../src/server/mail/outbox.ts';
 import { createSmtpTransport } from '../../src/server/mail/transport.ts';
@@ -324,6 +325,10 @@ describe('migrations', () => {
   test('a second run against a migrated database applies nothing', async () => {
     assert.deepEqual(await migrate(h.db), []);
     const versions = await h.db.query('SELECT version FROM schema_migrations ORDER BY version');
-    assert.deepEqual(versions.rows.map((r) => r.version), ['0001_identity_mail']);
+    const files = readdirSync('migrations')
+      .filter((f) => f.endsWith('.sql'))
+      .map((f) => f.replace(/\.sql$/, ''))
+      .sort();
+    assert.deepEqual(versions.rows.map((r) => r.version), files);
   });
 });

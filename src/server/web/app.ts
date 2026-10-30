@@ -11,6 +11,7 @@ import type { Db } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { log } from '../platform/log.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
+import { registerContentRoutes } from './content-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
@@ -92,6 +93,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   registerIdentityRoutes(app, deps);
+  registerContentRoutes(app, deps);
 
   const staticRoot = resolve(config.staticDir);
   const hasClient = existsSync(resolve(staticRoot, 'index.html'));

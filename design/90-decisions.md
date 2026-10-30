@@ -8,6 +8,14 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-30 — S2: chapter text is stored as the exact JSON it is served as
+- **Context:** I-10 says `contentSha256` hashes the stored content. Postgres `jsonb` reorders keys and normalises whitespace, so a hash of the input would not match what a later read returns.
+- **Chosen:** `chapters.content` is `text` holding canonical JSON (`verses`, `headings`, `footnotes`, keys in a fixed order). The chapter endpoint splices those bytes into the response unchanged, and its ETag is the hash, so an unchanged chapter costs a 304. The import writes a row only when the hash differs (`ON CONFLICT … WHERE content_sha256 <> excluded.content_sha256`), which is how a re-run changes no rows.
+- **Chosen:** AO Lab's structure is flattened on import. A verse is one string. Poetry lines are separated by newlines and shown with `white-space: pre-line`. Section headings and Psalm superscriptions become `headings` keyed to the verse they precede. Footnote markers are dropped from the text and footnotes are listed per verse. Footnotes attached to a whole chapter are dropped. A chapter whose verse count disagrees with the source's `numberOfVerses` fails alone; the run is then `partial`.
+- **Chosen:** browser tests use the `playwright` library under `node:test`, the same runner as every other suite, against the real server and the built client.
+- **Rejected:** `jsonb` content with a hash of `content::text`. That hash would change with Postgres's serialisation, not with the text.
+- **Rejected:** `@playwright/test`. A second runner and config for five tests.
+
 ### 2026-10-30 — S1: email-job secrets are sealed, and every server key derives from one APP_SECRET
 - **Context:** the outbox stores rendered mail before the worker sends it. A login code in plain text in `email_jobs` would let anyone with a database dump sign in as that member for ten minutes.
 - **Chosen:** the job row carries `{{code}}` placeholders and a `sealed_secrets` column (AES-256-GCM). The worker fills the placeholders at send time and nulls the column when the job reaches `sent` or `failed`. This adds an optional `secrets` field to the contract's `enqueueEmail` input. The sealing key and the login-code pepper are HKDF-SHA256 derivations of `APP_SECRET` with distinct purposes, so deployment has one secret to keep. `GET /__build-id` returns `{"buildId": …}` as JSON, so the update check (S14) and the CI container probe parse one shape.
