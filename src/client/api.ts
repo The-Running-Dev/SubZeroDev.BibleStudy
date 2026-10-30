@@ -11,6 +11,7 @@ import type {
   Profile,
   ProfilePatch,
   RequestCodeResponse,
+  StudySessionResponse,
   TranslationId,
   TranslationView,
   VerifyCodeResponse,
@@ -62,6 +63,10 @@ export const api = {
   // 202 while a recording is being prepared; the body lists what is ready so far.
   recordings: (translationId: TranslationId, bookId: string, chapter: number) =>
     call<RecordingsResponse>('GET', `/api/content/${translationId}/${bookId}/${chapter}/recordings`),
+  // Starts the group's study, or returns the one already active.
+  startSession: (groupId: string) => call<StudySessionResponse>('POST', `/api/groups/${groupId}/session`),
+  // 404 `no_active_session` when nobody has started one.
+  activeSession: (groupId: string) => call<StudySessionResponse>('GET', `/api/groups/${groupId}/session`),
 };
 
 export function messageFor(error: unknown): string {

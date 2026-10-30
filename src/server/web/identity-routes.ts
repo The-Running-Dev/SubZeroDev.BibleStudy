@@ -6,13 +6,14 @@ import { loginCodeStatus, requestLoginCode, verifyLoginCode } from '../identity/
 import { getProfile, updateProfile } from '../identity/profile.ts';
 import { revokeSession } from '../identity/sessions.ts';
 import { withTransaction } from '../platform/db.ts';
+import type { RealtimeHub } from '../study/realtime.ts';
 import type { AppDeps } from './app.ts';
 import { requireAuth } from './auth.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
 
 type Body = Record<string, unknown> | undefined;
 
-export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps): void {
+export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, hub: RealtimeHub): void {
   const identity: IdentityDeps = {
     db: deps.db,
     clock: deps.clock,
@@ -42,7 +43,10 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps): voi
   });
 
   app.post('/api/auth/logout', async (request, reply) => {
-    await revokeSession(deps.db, deps.clock, requireAuth(request).sessionId);
+    const { sessionId } = requireAuth(request);
+    await revokeSession(deps.db, deps.clock, sessionId);
+    // Realtime connections opened with this session end with it.
+    hub.closeAuthSession(sessionId);
     reply.clearCookie(sessionCookie, { path: '/' });
     return reply.status(204).send();
   });

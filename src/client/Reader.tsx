@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ChapterView, PassageRef, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
+import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
 
 type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView } | { kind: 'unavailable'; message: string };
@@ -122,43 +123,6 @@ export function Reader() {
           {next ? `${bookById(next.bookId)!.name} ${next.chapter}` : 'Next'} ›
         </button>
       </nav>
-    </>
-  );
-}
-
-function Passage(props: { chapter: ChapterView; marked: (verse: number) => boolean; playing: number | null }) {
-  const { chapter } = props;
-  return (
-    <>
-      {chapter.verses.map((verse) => (
-        <Fragment key={verse.number}>
-          {chapter.headings
-            .filter((h) => h.beforeVerse === verse.number)
-            .map((h, i) => (
-              <h2 key={i} className="passage-heading">
-                {h.text}
-              </h2>
-            ))}
-          <p
-            id={`v-${verse.number}`}
-            className={['verse', props.marked(verse.number) && 'marked', props.playing === verse.number && 'playing'].filter(Boolean).join(' ')}
-            aria-current={props.marked(verse.number) ? 'true' : undefined}
-            data-playing={props.playing === verse.number ? 'true' : undefined}
-          >
-            <sup className="verse-number">{verse.number}</sup>
-            {verse.text}
-          </p>
-        </Fragment>
-      ))}
-      {chapter.footnotes.length > 0 && (
-        <aside className="footnotes" aria-label="Footnotes">
-          {chapter.footnotes.map((note, i) => (
-            <p key={i}>
-              <a href={`#v-${note.verse}`}>{note.verse}</a> {note.text}
-            </p>
-          ))}
-        </aside>
-      )}
     </>
   );
 }

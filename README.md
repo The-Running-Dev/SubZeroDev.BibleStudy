@@ -50,11 +50,15 @@ A private Bible-study app for a small group: shared narrated reading, questions 
 
    Set `OWNER_EMAIL` in `.env` to the owner's address before the owner first signs in. That first sign-in creates the one group, "Bible Study", meeting Mondays at 06:15 `America/Chicago` and starting at Romans 1, owned by that user. Anyone else who signs in without an invitation has an account but no group. In the app, tap the group name, then **Create invitation link**, and send the link yourself; the app never emails invitations. Each link lets one person join and works for 14 days. The owner can revoke an open link and remove a member; a removed member's open connection is closed at once, and they need a new link to come back.
 
+8. **Study together**
+
+   A member of the group sees **Study** next to the group name. **Start study** opens the group's one live session at its current passage (Romans 1 to begin with); anyone who arrives later gets **Join study**, and two people starting at once land in the same session. Everyone in the session hears the same narration at the same point: any member can play, pause, skip ±10 s, scrub, change the passage, narrator or speed, or end the study, and the status line names who paused. Each phone corrects its own drift against the server clock. A phone that drops its connection reconnects by itself and picks up the current state; anything tapped while it was offline is not sent. With CSB as the shared translation there is no narration, so the study runs as reading together: a tap on a verse marks it for everyone. The session keeps going when its starter leaves; once nobody is connected for 20 s it pauses, and a server restart leaves it paused where it was.
+
 ## Integration and browser tests
 
 `npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services` and empties their tables, so re-import afterwards. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`. The content tests import Romans from the live AO Lab API (`AOLAB_BASE_URL` overrides it), so they need network access; import failures and retries are tested against a local fixture server.
 
-`npm run test:e2e` drives the built client in headless Chromium at phone size. Run `npm run build` and, once, `npx playwright install chromium` first. Set `E2E_SCREENSHOTS` to a directory to keep screenshots.
+`npm run test:e2e` drives the built client in headless Chromium at phone size. Run `npm run build` and, once, `npx playwright install chromium` first. Set `E2E_SCREENSHOTS` to a directory to keep screenshots. The study tests play Romans 1 on three clients for two minutes and print the drift report.
 
 ## Container
 

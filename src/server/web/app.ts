@@ -15,6 +15,7 @@ import { sessionCookie, setSessionCookie } from './cookies.ts';
 import { registerContentRoutes } from './content-routes.ts';
 import { registerGroupRoutes } from './group-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
+import { registerStudyRoutes } from './study-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
 import type { RealtimeHub } from '../study/realtime.ts';
@@ -102,9 +103,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     return { buildId: config.buildId };
   });
 
-  registerIdentityRoutes(app, deps);
+  const hub = deps.hub ?? createRealtimeHub();
+  app.addHook('onClose', async () => hub.stop());
+  registerIdentityRoutes(app, deps, hub);
   registerContentRoutes(app, deps);
-  registerGroupRoutes(app, deps, deps.hub ?? createRealtimeHub());
+  registerGroupRoutes(app, deps, hub);
+  registerStudyRoutes(app, deps, hub);
 
   const staticRoot = resolve(config.staticDir);
   const hasClient = existsSync(resolve(staticRoot, 'index.html'));

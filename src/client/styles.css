@@ -219,6 +219,48 @@ button:disabled {
   width: 100%;
 }
 
+.study {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.study-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.study-controls input[type='range'] {
+  width: 100%;
+}
+
+.study-status {
+  font-weight: 600;
+  margin: 0;
+}
+
+.study-connection {
+  margin: 0.5rem 0 0;
+  color: #b45309;
+}
+
+.presence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.verse[role='button'] {
+  cursor: pointer;
+}
+
 .player-label,
 .player-note {
   font-size: 0.875rem;

@@ -56,7 +56,11 @@ export async function truncateAll(db: Db): Promise<void> {
 
 // `env` overrides the test configuration, e.g. STATIC_DIR to serve the built client.
 // Recordings go to a fresh temporary MEDIA_DIR unless one is given; `source` replaces the live AO Lab for the audio worker.
-export async function startHarness(env: Record<string, string> = {}, options: { source?: ContentSource } = {}): Promise<Harness> {
+// The audio worker is notified but not run: tests drive it with runOnce().
+export async function startHarness(
+  env: Record<string, string> = {},
+  options: { source?: ContentSource; emptyRoomGraceMs?: number } = {},
+): Promise<Harness> {
   const tempMedia = env.MEDIA_DIR ? null : mkdtempSync(join(tmpdir(), 'biblestudy-media-'));
   const config = loadConfig({
     MEDIA_DIR: tempMedia ?? '',
@@ -78,7 +82,7 @@ export async function startHarness(env: Record<string, string> = {}, options: { 
   const worker = createMailWorker({ db, clock, transport, sealKey });
   const source = options.source ?? createAoLabSource({ baseUrl: config.aolabBaseUrl });
   const audioWorker = createAudioWorker({ db, clock, source, mediaDir: config.mediaDir });
-  const hub = createRealtimeHub();
+  const hub = createRealtimeHub({ emptyRoomGraceMs: options.emptyRoomGraceMs });
   const app = await buildApp({
     config,
     db,
@@ -86,6 +90,7 @@ export async function startHarness(env: Record<string, string> = {}, options: { 
     outbox: createOutbox({ clock, sealKey }),
     codePepper: deriveKey(config.appSecret, 'login-code-pepper'),
     onEmailQueued: () => worker.notify(),
+    onAudioQueued: () => audioWorker.notify(),
     hub,
   });
   return {
