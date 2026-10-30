@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { generateCode, hashCode } from '../../src/server/identity/codes.ts';
-import { isValidTimeZone, normalizeDisplayName, normalizeEmail } from '../../src/server/identity/validation.ts';
+import { canonicalTimeZone, isValidTimeZone, normalizeDisplayName, normalizeEmail } from '../../src/server/identity/validation.ts';
 import { fillPlaceholders, nextDelayMinutes } from '../../src/server/mail/worker.ts';
 import { isPermanentFailure } from '../../src/server/mail/transport.ts';
 import { deriveKey } from '../../src/server/platform/secrets.ts';
@@ -26,6 +26,12 @@ describe('isValidTimeZone', () => {
     assert.ok(!isValidTimeZone('Mars/Base'));
     assert.ok(!isValidTimeZone(''));
     assert.ok(!isValidTimeZone(3));
+  });
+
+  test('refuses bare offsets and returns the canonical spelling', () => {
+    for (const offset of ['+01:00', '-0800', '+02']) assert.equal(canonicalTimeZone(offset), null);
+    assert.equal(canonicalTimeZone('europe/sofia'), 'Europe/Sofia');
+    assert.equal(canonicalTimeZone('utc'), 'UTC');
   });
 });
 

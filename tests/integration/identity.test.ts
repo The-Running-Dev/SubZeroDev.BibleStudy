@@ -172,6 +172,12 @@ describe('S1.5 rate limits', () => {
     assert.equal(response.json().error, 'rate_limited');
     assert.equal((await requestCode('m20@example.test', '198.51.100.8')).statusCode, 200);
   });
+
+  test('concurrent requests from one address for different emails cannot overshoot the limit', async () => {
+    const responses = await Promise.all(Array.from({ length: 25 }, (_, i) => requestCode(`c${i}@example.test`, '198.51.100.9')));
+    assert.equal(responses.filter((r) => r.statusCode === 200).length, 20);
+    assert.equal(responses.filter((r) => r.statusCode === 429).length, 5);
+  });
 });
 
 describe('S1.6 devices', () => {
@@ -223,6 +229,19 @@ describe('S1.7 profile', () => {
     assert.equal(me.json().timeZone, 'Europe/Sofia');
     assert.equal(me.json().displayName, 'Ana');
   });
+
+  test('refuses a bare offset and stores the canonical zone name (I-03)', async () => {
+    const { cookie } = await signIn(h, member);
+    const patch = (payload: object) => h.app.inject({ method: 'PATCH', url: '/api/me', cookies: { bs_session: cookie }, payload });
+
+    for (const offset of ['+01:00', '-0800']) {
+      const bad = await patch({ timeZone: offset });
+      assert.equal(bad.statusCode, 400);
+      assert.equal(bad.json().error, 'invalid_zone');
+    }
+    const lower = await patch({ timeZone: 'europe/sofia' });
+    assert.equal(lower.json().timeZone, 'Europe/Sofia');
+  });
 });
 
 describe('S1.8 authentication', () => {
@@ -232,6 +251,11 @@ describe('S1.8 authentication', () => {
     ['POST', '/api/auth/logout'],
     ['GET', '/api/groups'],
     ['GET', '/api/anything/else'],
+    // Percent-encoded paths route to the same handlers and must be refused the same way.
+    ['GET', '/%61pi/me'],
+    ['PATCH', '/%61pi/me'],
+    ['POST', '/%61pi/auth/logout'],
+    ['GET', '/api/%6De'],
   ] as const) {
     test(`${method} ${url} without a cookie is unauthenticated`, async () => {
       const response = await h.app.inject({ method, url, payload: method === 'GET' ? undefined : {} });

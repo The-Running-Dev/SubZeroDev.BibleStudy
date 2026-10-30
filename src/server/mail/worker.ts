@@ -80,8 +80,6 @@ export function createMailWorker(deps: { db: Db; clock: Clock; transport: MailTr
         text: fillPlaceholders(job.text_body, values),
         html: fillPlaceholders(job.html_body, values),
       });
-      await finish(job.id, 'sent', deps.clock.now(), null);
-      log('info', 'email sent', { jobId: job.id, kind: job.kind });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const delay = isPermanentFailure(error) ? null : nextDelayMinutes(job.attempts);
@@ -97,13 +95,25 @@ export function createMailWorker(deps: { db: Db; clock: Clock; transport: MailTr
         );
         log('warn', 'email retry scheduled', { jobId: job.id, kind: job.kind, attempts: job.attempts, delayMinutes: delay, error: message });
       }
+      return;
     }
+    // Recording the send is outside the send's try: a database error here must not be mistaken for a
+    // failed send and mail the same message again. The job stays claimed and is picked up as stale.
+    await finish(job.id, 'sent', deps.clock.now(), null);
+    log('info', 'email sent', { jobId: job.id, kind: job.kind });
   }
 
   async function runOnce(): Promise<number> {
     const now = deps.clock.now();
     const jobs = await claim(now);
-    for (const job of jobs) await deliver(job, now);
+    for (const job of jobs) {
+      // One job's bookkeeping failure must not strand the rest of the batch in 'sending'.
+      try {
+        await deliver(job, now);
+      } catch (error) {
+        log('error', 'email job bookkeeping failed', { jobId: job.id, kind: job.kind, error: (error as Error).message });
+      }
+    }
     return jobs.length;
   }
 

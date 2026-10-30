@@ -1,7 +1,7 @@
 import type { Profile, ProfilePatch, TranslationId } from '../../shared/api.ts';
 import type { Queryable } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
-import { isValidTimeZone, normalizeDisplayName } from './validation.ts';
+import { canonicalTimeZone, normalizeDisplayName } from './validation.ts';
 
 export interface UserRow {
   id: string;
@@ -43,8 +43,9 @@ export async function updateProfile(db: Queryable, userId: string, patch: unknow
     sets.push(`display_name = $${values.length}`);
   }
   if ('timeZone' in input) {
-    if (!isValidTimeZone(input.timeZone)) throw new AppError('invalid_zone', 400, `${String(input.timeZone)} is not a known time zone.`);
-    values.push(input.timeZone);
+    const zone = canonicalTimeZone(input.timeZone);
+    if (!zone) throw new AppError('invalid_zone', 400, `${String(input.timeZone)} is not a known time zone.`);
+    values.push(zone);
     sets.push(`time_zone = $${values.length}`);
   }
   if ('displayTranslationId' in input) {

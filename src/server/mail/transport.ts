@@ -13,8 +13,9 @@ export interface MailTransport {
 }
 
 // Any SMTP relay: Mailpit in development, a Gmail app password or a self-hosted Postfix in production.
+// Timeouts are short so a hung relay fails the attempt (and schedules a retry) instead of stalling every queued code.
 export function createSmtpTransport(smtpUrl: string, from: string): MailTransport {
-  const transporter = nodemailer.createTransport(smtpUrl);
+  const transporter = nodemailer.createTransport({ url: smtpUrl, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000 });
   return {
     async send(mail) {
       await transporter.sendMail({ from, ...mail });

@@ -9,15 +9,21 @@ export function normalizeEmail(input: unknown): string {
   return email;
 }
 
-// Accepts exactly what the runtime's zone data accepts, so stored zones always format.
-export function isValidTimeZone(zone: unknown): zone is string {
-  if (typeof zone !== 'string' || zone.length === 0 || zone.length > 64) return false;
+// The runtime's canonical spelling of an IANA zone name ("europe/sofia" becomes "Europe/Sofia"), or null.
+// The runtime also accepts bare offsets such as "+01:00"; those are refused, since a stored zone must follow
+// daylight-saving changes (I-03).
+export function canonicalTimeZone(zone: unknown): string | null {
+  if (typeof zone !== 'string' || zone.length === 0 || zone.length > 64) return null;
   try {
-    new Intl.DateTimeFormat('en', { timeZone: zone });
-    return true;
+    const resolved = new Intl.DateTimeFormat('en', { timeZone: zone }).resolvedOptions().timeZone;
+    return /^[A-Za-z]/.test(resolved) ? resolved : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isValidTimeZone(zone: unknown): zone is string {
+  return canonicalTimeZone(zone) !== null;
 }
 
 export function normalizeDisplayName(input: unknown): string {

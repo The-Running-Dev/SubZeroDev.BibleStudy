@@ -10,12 +10,24 @@ export interface Config {
   host: string;
   port: number;
   cookieSecure: boolean;
-  trustProxy: boolean;
+  // Hop count or proxy addresses; never "trust every hop", which would let clients pick their own IP.
+  trustProxy: false | number | string;
   buildId: string;
   staticDir: string;
 }
 
 type Env = Record<string, string | undefined>;
+
+function parseTrustProxy(raw: string | undefined, problems: string[]): false | number | string {
+  const value = raw?.trim() ?? '';
+  if (value === '' || value === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === 'true') {
+    problems.push('TRUST_PROXY=true trusts every hop; set the number of proxies (usually 1) or their addresses');
+    return false;
+  }
+  return value;
+}
 
 export function loadConfig(env: Env = process.env): Config {
   const problems: string[] = [];
@@ -34,7 +46,7 @@ export function loadConfig(env: Env = process.env): Config {
     host: env.HOST?.trim() || '0.0.0.0',
     port: Number(env.PORT ?? 3000),
     cookieSecure: env.COOKIE_SECURE !== 'false',
-    trustProxy: env.TRUST_PROXY === 'true',
+    trustProxy: parseTrustProxy(env.TRUST_PROXY, problems),
     buildId: env.BUILD_ID?.trim() || 'dev',
     staticDir: env.STATIC_DIR?.trim() || 'dist/client',
   };

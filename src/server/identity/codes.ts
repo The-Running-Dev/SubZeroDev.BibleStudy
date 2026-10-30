@@ -59,8 +59,10 @@ export async function requestLoginCode(
   const since = new Date(now.getTime() - hourMs);
 
   return withTransaction(deps.db, async (tx) => {
-    // Serialise requests for one address so the hourly count cannot be raced.
+    // Serialise requests per address and per client so neither hourly count can be raced.
+    // Always email first, then IP, so two requests never wait on each other in opposite orders.
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`login_code:${email}`]);
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`login_code_ip:${input.ip}`]);
 
     const byEmail = await tx.query<{ count: string; oldest: Date | null }>(
       'SELECT count(*) AS count, min(created_at) AS oldest FROM login_codes WHERE lower(email) = $1 AND created_at > $2',

@@ -58,6 +58,12 @@ describe('loadConfig', () => {
     assert.throws(() => loadConfig({ ...base, PORT: 'abc' }), /PORT must be a positive integer/);
   });
 
+  test('trusts a hop count or proxy addresses, never every hop', () => {
+    assert.equal(loadConfig({ ...base, TRUST_PROXY: '1' }).trustProxy, 1);
+    assert.equal(loadConfig({ ...base, TRUST_PROXY: '10.0.0.0/8' }).trustProxy, '10.0.0.0/8');
+    assert.throws(() => loadConfig({ ...base, TRUST_PROXY: 'true' }), /TRUST_PROXY=true trusts every hop/);
+  });
+
   test('strips a trailing slash from PUBLIC_URL', () => {
     assert.equal(loadConfig({ ...base, PUBLIC_URL: 'https://study.example.test/' }).publicUrl, 'https://study.example.test');
   });

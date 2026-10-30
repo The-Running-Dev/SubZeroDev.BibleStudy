@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyServerOptions } from 'fastify';
 import type { Outbox } from '../mail/outbox.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Config } from '../platform/config.ts';
@@ -24,6 +24,15 @@ declare module 'fastify' {
   }
 }
 
+function decodedPath(url: string): string {
+  const path = url.split('?')[0];
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
 export interface AppDeps {
   config: Config;
   db: Db;
@@ -36,14 +45,21 @@ export interface AppDeps {
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const { config } = deps;
-  const app = Fastify({ logger: false, trustProxy: config.trustProxy, bodyLimit: 256 * 1024 });
+  // A hop count trusts that many proxies nearest the server, the same rule proxy-addr applies to a number.
+  const hops = config.trustProxy;
+  const trustProxy = typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;
+  const options: FastifyServerOptions = { logger: false, trustProxy, bodyLimit: 256 * 1024 };
+  const app = Fastify(options);
 
   await app.register(fastifyCookie);
   app.decorateRequest('auth', null);
 
   app.addHook('onRequest', async (request, reply) => {
-    const path = request.url.split('?')[0];
-    if (!path.startsWith('/api/') || publicApiPaths.has(path)) return;
+    // Decide on the matched route, not the raw URL: Fastify decodes the path before routing, so
+    // "/%61pi/me" reaches the /api/me handler while its raw URL does not start with /api/.
+    // Unmatched paths are judged by their decoded form, so an unknown /api/ path is refused before it 404s.
+    const route = request.routeOptions.url ?? decodedPath(request.url);
+    if (!route.startsWith('/api/') || publicApiPaths.has(route)) return;
     const auth = await authenticate(deps.db, deps.clock, request.cookies[sessionCookie]);
     if (!auth) throw new AppError('unauthenticated', 401, 'Sign in to continue.');
     request.auth = auth;

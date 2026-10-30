@@ -5,6 +5,7 @@ import { loginCodeStatus, requestLoginCode, verifyLoginCode } from '../identity/
 import { getProfile, updateProfile } from '../identity/profile.ts';
 import { revokeSession } from '../identity/sessions.ts';
 import type { AppDeps } from './app.ts';
+import { requireAuth } from './auth.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
 
 type Body = Record<string, unknown> | undefined;
@@ -39,12 +40,12 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps): voi
   });
 
   app.post('/api/auth/logout', async (request, reply) => {
-    await revokeSession(deps.db, deps.clock, request.auth!.sessionId);
+    await revokeSession(deps.db, deps.clock, requireAuth(request).sessionId);
     reply.clearCookie(sessionCookie, { path: '/' });
     return reply.status(204).send();
   });
 
-  app.get('/api/me', async (request) => getProfile(deps.db, request.auth!.userId));
+  app.get('/api/me', async (request) => getProfile(deps.db, requireAuth(request).userId));
 
-  app.patch('/api/me', async (request) => updateProfile(deps.db, request.auth!.userId, request.body));
+  app.patch('/api/me', async (request) => updateProfile(deps.db, requireAuth(request).userId, request.body));
 }

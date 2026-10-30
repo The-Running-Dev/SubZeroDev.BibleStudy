@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 # No `paths` filter: this job reports on every pull request so merges always have a check.
 jobs:
   ci:
