@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { FastifyRequest } from 'fastify';
-import { stopStatus } from '../../src/connector/connector.ts';
+import { createConnector, stopStatus } from '../../src/connector/connector.ts';
+import type { ConnectorToServer } from '../../src/shared/api.ts';
 import { dispatchText, parseConnectorMessage } from '../../src/server/assistant/assistant.ts';
 import { loadConfig } from '../../src/server/platform/config.ts';
 import { connectorAuthorized } from '../../src/server/web/assistant-routes.ts';
+import { FakeRuntime } from '../support/fake-runtime.ts';
 
 const conversationId = '0192f0a0-0000-7000-8000-000000000001';
 const turnId = '0192f0a0-0000-7000-8000-000000000002';
@@ -126,5 +128,69 @@ describe('assistant configuration', () => {
   test('rejects a bad owner email or a short connector token', () => {
     assert.throws(() => loadConfig({ ...base, ASSISTANT_OWNER_EMAIL: 'owner' }), /ASSISTANT_OWNER_EMAIL must be an email address/);
     assert.throws(() => loadConfig({ ...base, CONNECTOR_TOKEN: 'short' }), /CONNECTOR_TOKEN must be at least 32 characters/);
+  });
+});
+
+describe('the connector', () => {
+  const other = '0192f0a0-0000-7000-8000-000000000003';
+  const otherTurn = '0192f0a0-0000-7000-8000-000000000004';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  function connected(runtime: FakeRuntime) {
+    const sent: ConnectorToServer[] = [];
+    const connector = createConnector({ runtime, principal: 'p', workspace: (id) => `C:/work/${id}`, provider: 'claude', send: (m) => sent.push(m) });
+    return { connector, sent };
+  }
+
+  test('turns of two sessions with the same runtime turn id each report their own server turn', async () => {
+    const runtime = new FakeRuntime();
+    const { connector, sent } = connected(runtime);
+    runtime.script = 'hold';
+    await connector.handle({ t: 'dispatch', turnId, conversationId, runtimeSessionId: null, text: 'a' });
+    await connector.handle({ t: 'dispatch', turnId: otherTurn, conversationId: other, runtimeSessionId: null, text: 'b' });
+    await settle();
+    const [a, b] = runtime.sent;
+    assert.equal(a.turnId, b.turnId);
+    runtime.finish(b.sessionId, b.turnId);
+    runtime.finish(a.sessionId, a.turnId);
+    await settle();
+    const ended = sent.filter((m) => m.t === 'event' && m.kind === 'status' && m.status === 'completed');
+    assert.deepEqual(
+      ended.map((m) => m.t === 'event' && [m.runtimeSessionId, m.turnId]),
+      [
+        [b.sessionId, otherTurn],
+        [a.sessionId, turnId],
+      ],
+    );
+  });
+
+  test('a dispatch without a session reuses the live one and tells the server again', async () => {
+    const runtime = new FakeRuntime();
+    const { connector, sent } = connected(runtime);
+    await connector.handle({ t: 'dispatch', turnId, conversationId, runtimeSessionId: null, text: 'a' });
+    await settle();
+    // The server missed the 'session' message, so the next dispatch carries none.
+    await connector.handle({ t: 'dispatch', turnId: otherTurn, conversationId, runtimeSessionId: null, text: 'b' });
+    await settle();
+    assert.equal(runtime.sessions.size, 1);
+    const [sessionId] = runtime.sessions.keys();
+    assert.deepEqual(
+      sent.filter((m) => m.t === 'session'),
+      [
+        { t: 'session', conversationId, runtimeSessionId: sessionId },
+        { t: 'session', conversationId, runtimeSessionId: sessionId },
+      ],
+    );
+    assert.deepEqual(
+      sent.filter((m) => m.t === 'accepted').map((m) => m.t === 'accepted' && m.runtimeSessionId),
+      [sessionId, sessionId],
+    );
+  });
+});
+
+describe('parseConnectorMessage and NUL', () => {
+  test('NUL is removed from runtime text, which Postgres cannot store', () => {
+    const message = parse({ t: 'event', conversationId, runtimeSessionId: 's', seq: 3, turnId, kind: 'message', text: 'a\u0000b' });
+    assert.equal(message?.t === 'event' && message.text, 'ab');
   });
 });

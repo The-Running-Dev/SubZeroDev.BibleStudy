@@ -112,6 +112,8 @@ function parseTurn(body: unknown): TurnInput {
   if (!isUuid(b.clientTurnId)) throw invalid('clientTurnId is a UUID.');
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
   if (!prompt || prompt.length > maxPromptLength) throw invalid(`Ask something, up to ${maxPromptLength} characters.`);
+  // Postgres text cannot hold NUL.
+  if (prompt.includes('\u0000')) throw invalid('The question contains a character that cannot be stored.');
   const context = b.context as Record<string, unknown> | null;
   if (!context || typeof context !== 'object') throw invalid('context is { translationId, ref, noteIds }.');
   // Notes join the context with S12.
@@ -155,7 +157,8 @@ export function parseConnectorMessage(raw: unknown): ConnectorToServer | null {
         turnId: m.turnId as string | null,
         ...(m.runtimeTurnId === undefined ? {} : { runtimeTurnId: m.runtimeTurnId as string }),
         kind: m.kind as 'delta' | 'message' | 'status' | 'tool_attempt',
-        ...(m.text === undefined ? {} : { text: m.text as string }),
+        // Postgres text cannot hold NUL, so a runtime that emits one does not fail the store.
+        ...(m.text === undefined ? {} : { text: (m.text as string).replaceAll('\u0000', '') }),
         ...(m.kind === 'status' ? { status: m.status as AssistantTurnStatus } : {}),
       };
     }
@@ -521,7 +524,12 @@ export function createAssistant(deps: AssistantDeps): Assistant {
       }
 
       // I-23: dispatched once. A turn whose dispatch cannot be written is failed, never sent again.
-      await db.query(`UPDATE assistant_turns SET status = 'dispatched' WHERE id = $1 AND status = 'queued'`, [turnId]);
+      const marked = await db.query(`UPDATE assistant_turns SET status = 'dispatched' WHERE id = $1 AND status = 'queued'`, [turnId]);
+      if (marked.rowCount !== 1) {
+        // A link replaced meanwhile already failed it as not delivered; it is not sent.
+        const now = await existing();
+        return { turnId, status: now?.status ?? 'failed', existing: false };
+      }
       const sent = send({
         t: 'dispatch',
         turnId,
@@ -557,6 +565,8 @@ export function createAssistant(deps: AssistantDeps): Assistant {
       const current: Link = { socket, runtimeVersion: null, lastHeard: Date.now() };
       link = current;
       if (previous) {
+        // Interrupts waiting on the old link's 'accepted' would never be answered.
+        pendingInterrupts.clear();
         enqueue(strandInFlight);
         try {
           previous.socket.close(4409, 'replaced');

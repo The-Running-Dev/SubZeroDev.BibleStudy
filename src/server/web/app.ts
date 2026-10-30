@@ -63,7 +63,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify(options);
 
   await app.register(fastifyCookie);
-  await app.register(fastifyWebsocket, { options: { maxPayload: 64 * 1024 } });
+  // Sized for the connector's link, which carries whole answers; /ws enforces its own smaller limit.
+  await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
   app.decorateRequest('auth', null);
 
   app.addHook('onRequest', async (request, reply) => {

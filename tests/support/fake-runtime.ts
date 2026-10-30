@@ -10,6 +10,7 @@ interface Session {
   cwd: string;
   events: RuntimeEvent[];
   openTurn: string | null;
+  turns: number;
 }
 
 let instances = 0;
@@ -77,7 +78,7 @@ export class FakeRuntime implements RuntimeClient {
         // As the real runtime: one live session per working directory.
         if ([...this.sessions.values()].some((s) => s.cwd === params.cwd)) throw new RuntimeError('workspace_busy', 'a session is live in that directory');
         const id = this.id(`rt-session-${this.instance}`);
-        this.sessions.set(id, { cwd: String(params.cwd), events: [], openTurn: null });
+        this.sessions.set(id, { cwd: String(params.cwd), events: [], openTurn: null, turns: 0 });
         return { sessionId: id };
       }
       case 'sessions.get': {
@@ -110,7 +111,8 @@ export class FakeRuntime implements RuntimeClient {
         const sessionId = String(params.sessionId);
         const session = this.session(params);
         if (session.openTurn) throw new RuntimeError('turn_in_flight', 'a turn is open');
-        const turnId = this.id('rt-turn');
+        // As the real runtime's, unique only within the session.
+        const turnId = `rt-turn-${++session.turns}`;
         this.sent.push({ sessionId, turnId, text: String(params.text) });
         session.openTurn = turnId;
         setImmediate(() => {

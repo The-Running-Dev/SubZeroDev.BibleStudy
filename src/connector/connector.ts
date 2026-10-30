@@ -42,10 +42,12 @@ export function createConnector(options: ConnectorOptions): Connector {
   const { runtime, principal, send } = options;
   const conversations = new Map<string, Conversation>();
   const bySubscription = new Map<string, Conversation>();
-  // Runtime turn → server turn, for turns dispatched through this process.
+  // Runtime turn → server turn, for turns dispatched through this process. Keyed by session as well, since
+  // runtime turn ids are unique only within one session; dropped when the turn ends.
   const turnIds = new Map<string, string>();
-  // Runtime turns already reported and interrupted for tool use.
+  // Runtime turns already reported and interrupted for tool use, keyed the same way.
   const toolReported = new Set<string>();
+  const turnKey = (sessionId: string, runtimeTurnId: string) => `${sessionId}:${runtimeTurnId}`;
 
   runtime.onEvent((subscriptionId, event) => {
     const conversation = bySubscription.get(subscriptionId);
@@ -64,7 +66,7 @@ export function createConnector(options: ConnectorOptions): Connector {
       conversationId: conversation.id,
       runtimeSessionId: conversation.sessionId,
       seq: event.seq ?? 0,
-      turnId: runtimeTurnId ? (turnIds.get(runtimeTurnId) ?? null) : null,
+      turnId: runtimeTurnId ? (turnIds.get(turnKey(conversation.sessionId, runtimeTurnId)) ?? null) : null,
       ...(runtimeTurnId ? { runtimeTurnId } : {}),
       kind,
       ...extra,
@@ -72,8 +74,8 @@ export function createConnector(options: ConnectorOptions): Connector {
   }
 
   async function stopForTool(conversation: Conversation, event: RuntimeEvent, runtimeTurnId: string | null) {
-    if (!runtimeTurnId || toolReported.has(runtimeTurnId)) return;
-    toolReported.add(runtimeTurnId);
+    if (!runtimeTurnId || toolReported.has(turnKey(conversation.sessionId, runtimeTurnId))) return;
+    toolReported.add(turnKey(conversation.sessionId, runtimeTurnId));
     forward(conversation, event, 'tool_attempt', runtimeTurnId, {});
     await runtime.call('turns.interrupt', { sessionId: conversation.sessionId, principal, turnId: runtimeTurnId }).catch(() => undefined);
   }
@@ -97,6 +99,10 @@ export function createConnector(options: ConnectorOptions): Connector {
         if (conversation.openTurn === turnOf) conversation.openTurn = null;
         const status = stopStatus(event.data.stopReason);
         forward(conversation, event, 'status', turnOf, { status, ...(status === 'failed' ? { text: String(event.data.stopReason ?? 'error') } : {}) });
+        if (turnOf) {
+          turnIds.delete(turnKey(conversation.sessionId, turnOf));
+          toolReported.delete(turnKey(conversation.sessionId, turnOf));
+        }
         return;
       }
       case 'permission.request':
@@ -162,6 +168,11 @@ export function createConnector(options: ConnectorOptions): Connector {
   async function open(conversationId: string, runtimeSessionId: string | null): Promise<Conversation> {
     const known = conversations.get(conversationId);
     if (known && known.sessionId === runtimeSessionId) return known;
+    // The server has no session when it missed the 'session' message (the link dropped); this one is still live.
+    if (known && runtimeSessionId === null && (await sessionExists(known.sessionId))) {
+      send({ t: 'session', conversationId, runtimeSessionId: known.sessionId });
+      return known;
+    }
     if (known) await unsubscribe(known);
     const existing = runtimeSessionId ? await sessionExists(runtimeSessionId) : null;
     let conversation: Conversation;
@@ -181,7 +192,7 @@ export function createConnector(options: ConnectorOptions): Connector {
     try {
       const conversation = await open(message.conversationId, message.runtimeSessionId);
       const { turnId } = await runtime.call<{ turnId: string }>('turns.send', { sessionId: conversation.sessionId, principal, text: message.text });
-      turnIds.set(turnId, message.turnId);
+      turnIds.set(turnKey(conversation.sessionId, turnId), message.turnId);
       send({ t: 'accepted', turnId: message.turnId, runtimeSessionId: conversation.sessionId, runtimeTurnId: turnId });
     } catch (error) {
       const reason = error instanceof RuntimeError ? error.code : 'connector_error';

@@ -75,8 +75,27 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
   const [live, setLive] = useState<LiveStatus>('connecting');
   const cursor = useRef(0);
   const conversation = useRef<string | null>(null);
-  // Kept until the send is answered, so a retry after a dropped response is the same turn.
-  const pendingTurnId = useRef<string | null>(null);
+  // Kept until the send is answered, so a retry after a dropped response is the same turn. A changed
+  // question or passage is a new turn.
+  const pendingTurn = useRef<{ id: string; key: string } | null>(null);
+  // The turns as last rendered, for the event handlers.
+  const turnsRef = useRef<AssistantTurnView[]>([]);
+  // Only the newest fetch is applied, so a slow one never puts back an older state.
+  const fetchGeneration = useRef(0);
+  // Turns already under way when this page fetched them: the text streamed before is gone, so their
+  // deltas would show a fragment. They show a note until the stored answer arrives.
+  const [partial, setPartial] = useState<ReadonlySet<string>>(new Set());
+  const partialRef = useRef<ReadonlySet<string>>(new Set());
+
+  function showTurns(next: AssistantTurnView[]) {
+    turnsRef.current = next;
+    setTurns(next);
+  }
+
+  function markPartial(next: ReadonlySet<string>) {
+    partialRef.current = next;
+    setPartial(next);
+  }
 
   function addAnswer(turnId: string, position: number, text: string) {
     cursor.current = Math.max(cursor.current, position);
@@ -84,17 +103,22 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
     setDrafts((all) => without(all, turnId));
   }
 
-  function absorb(transcript: AssistantTranscript) {
-    setTurns(transcript.turns);
+  // `missed` is true when this page may have missed deltas (first load, reconnect): open turns become partial.
+  function absorb(transcript: AssistantTranscript, missed: boolean) {
+    showTurns(transcript.turns);
     for (const entry of transcript.entries) if (entry.kind === 'message') addAnswer(entry.turnId, entry.seq, entry.text);
-    const done = new Set(transcript.turns.filter(isTerminal).map((t) => t.id));
-    setDrafts((all) => Object.fromEntries(Object.entries(all).filter(([id]) => !done.has(id))));
+    const open = new Set(transcript.turns.filter((t) => !isTerminal(t)).map((t) => t.id));
+    if (missed) markPartial(open);
+    // Drafts of finished turns are replaced by their stored answers.
+    setDrafts((all) => Object.fromEntries(Object.entries(all).filter(([id]) => open.has(id) && !partialRef.current.has(id))));
   }
 
-  async function refresh() {
+  async function refresh(missed = false) {
     if (!conversation.current) return;
+    const generation = ++fetchGeneration.current;
     try {
-      absorb(await api.assistantTranscript(conversation.current, cursor.current));
+      const transcript = await api.assistantTranscript(conversation.current, cursor.current);
+      if (generation === fetchGeneration.current) absorb(transcript, missed);
     } catch {
       // The next reconnect or event tries again.
     }
@@ -103,25 +127,30 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
   function apply(event: AssistantEvent) {
     switch (event.kind) {
       case 'delta':
+        if (partialRef.current.has(event.turnId)) return;
         setDrafts((all) => ({ ...all, [event.turnId]: (all[event.turnId] ?? '') + event.text }));
         return;
       case 'message':
         addAnswer(event.turnId, event.seq, event.text);
         return;
       case 'turn_status': {
-        let known = false;
-        setTurns((all) =>
-          all.map((t) => {
+        // A turn sent from another tab: fetch it.
+        if (!turnsRef.current.some((t) => t.id === event.turnId)) {
+          void refresh();
+          return;
+        }
+        showTurns(
+          turnsRef.current.map((t) => {
             if (t.id !== event.turnId) return t;
-            known = true;
             const next: AssistantTurnView = { id: t.id, prompt: t.prompt, status: event.status };
             if (event.failure) next.failure = event.failure;
             return next;
           }),
         );
-        if (terminalTurnStatuses.includes(event.status)) setDrafts((all) => without(all, event.turnId));
-        // A turn sent from another tab: fetch it.
-        if (!known) void refresh();
+        if (terminalTurnStatuses.includes(event.status)) {
+          setDrafts((all) => without(all, event.turnId));
+          if (partialRef.current.has(event.turnId)) markPartial(new Set([...partialRef.current].filter((id) => id !== event.turnId)));
+        }
         return;
       }
     }
@@ -135,8 +164,9 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
         if (!current || !id) return;
         conversation.current = id;
         setConversationId(id);
+        const generation = ++fetchGeneration.current;
         const transcript = await api.assistantTranscript(id, 0);
-        if (current) absorb(transcript);
+        if (current && generation === fetchGeneration.current) absorb(transcript, true);
       })
       .catch((e) => current && setError(messageFor(e)));
 
@@ -150,7 +180,7 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
         if (s === 'open') {
           // Whatever happened while the page was away is in the transcript.
           if (wasOpen) {
-            void refresh();
+            void refresh(true);
             api.assistantStatus().then(props.onStatus, () => undefined);
           }
           wasOpen = true;
@@ -181,19 +211,20 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
         conversation.current = id;
         setConversationId(id);
       }
-      pendingTurnId.current ??= crypto.randomUUID();
+      const key = JSON.stringify([id, text, props.translationId, props.at]);
+      if (pendingTurn.current?.key !== key) pendingTurn.current = { id: crypto.randomUUID(), key };
       const result = await api.sendTurn(id, {
-        clientTurnId: pendingTurnId.current,
+        clientTurnId: pendingTurn.current.id,
         prompt: text,
         context: { translationId: props.translationId, ref: props.at, noteIds: [] },
       });
-      pendingTurnId.current = null;
+      pendingTurn.current = null;
       setPrompt('');
-      setTurns((all) => (all.some((t) => t.id === result.turnId) ? all : [...all, { id: result.turnId, prompt: text, status: result.status }]));
+      if (!turnsRef.current.some((t) => t.id === result.turnId)) showTurns([...turnsRef.current, { id: result.turnId, prompt: text, status: result.status }]);
       if (result.existing || result.status === 'failed') await refresh();
     } catch (e) {
       setError(messageFor(e));
-      if (!online) pendingTurnId.current = null;
+      if (!online) pendingTurn.current = null;
     } finally {
       setSending(false);
     }
@@ -217,7 +248,10 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
           {turns.map((turn) => {
             const stored = Object.entries(answers[turn.id] ?? {}).sort(([a], [b]) => Number(a) - Number(b));
             const draft = drafts[turn.id];
-            const note = reconnecting && turn === active ? 'Connection lost — checking whether the answer finished' : outcome(turn);
+            const note =
+              reconnecting && turn === active
+                ? 'Connection lost — checking whether the answer finished'
+                : (outcome(turn) ?? (partial.has(turn.id) && stored.length === 0 ? 'Answer in progress…' : null));
             return (
               <li key={turn.id} data-status={turn.status}>
                 <p className="assistant-prompt">{turn.prompt}</p>

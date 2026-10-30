@@ -36,7 +36,10 @@ const principal = readFileSync(principalFile, 'utf8').trim();
 
 // The provider runs Claude through a launcher that adds the flags that take every tool away (I-26).
 const locked = fileURLToPath(new URL('./claude-locked.mjs', import.meta.url));
-const runtime = startRuntime({ entry: runtimeEntry, env: { ...process.env, SKYNET_CLAUDE_EXECUTABLE: locked } });
+// The link token stays in this process; the runtime and Claude never need it.
+const runtimeEnv = { ...process.env };
+delete runtimeEnv.CONNECTOR_TOKEN;
+const runtime = startRuntime({ entry: runtimeEntry, env: { ...runtimeEnv, SKYNET_CLAUDE_EXECUTABLE: locked } });
 runtime.onExit((code) => {
   say('AgentConsole runtime exited', { code });
   process.exit(1);
@@ -93,7 +96,7 @@ function connect() {
         current.close();
       });
   });
-  current.on('unexpected-response', (_request, response) => say('server refused the link', { status: response.statusCode }));
+  // No 'unexpected-response' listener: with one, ws leaves a refused handshake open and 'close' never comes.
   current.on('error', (error) => say('link error', { error: error.message }));
   current.on('close', (code) => {
     if (socket === current) socket = null;

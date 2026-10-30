@@ -325,7 +325,7 @@ describe('asking (S6.1 with a fake runtime, S6.4)', () => {
     assert.equal(second.json().error, 'turn_in_progress');
   });
 
-  test('a prompt that is empty, too long or carries notes is refused', async () => {
+  test('a prompt that is empty, too long, holds NUL or carries notes is refused', async () => {
     const { cookie } = await owner();
     await link(new FakeRuntime(), cookie);
     const id = await conversation(cookie);
@@ -333,6 +333,7 @@ describe('asking (S6.1 with a fake runtime, S6.4)', () => {
     for (const payload of [
       { clientTurnId: randomUUID(), prompt: '   ', context: romans(16, 17) },
       { clientTurnId: randomUUID(), prompt: 'x'.repeat(4001), context: romans(16, 17) },
+      { clientTurnId: randomUUID(), prompt: 'Why\u0000?', context: romans(16, 17) },
       { clientTurnId: randomUUID(), prompt: 'Why?', context: { ...romans(16, 17), noteIds: [randomUUID()] } },
       { clientTurnId: 'not-a-uuid', prompt: 'Why?', context: romans(16, 17) },
       { clientTurnId: randomUUID(), prompt: 'Why?', context: romans(16, 40) },
