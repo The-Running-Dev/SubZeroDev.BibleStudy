@@ -280,3 +280,53 @@ button:disabled {
   gap: 0.5rem;
   padding-top: 1rem;
 }
+
+.assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 0;
+  border-top: 1px solid #9ca3af;
+}
+
+.assistant h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.assistant-turns {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.assistant-prompt {
+  margin: 0;
+  font-weight: 600;
+}
+
+.assistant-answer {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+}
+
+.assistant-note {
+  margin: 0.25rem 0 0;
+  font-style: italic;
+}
+
+.assistant textarea {
+  font: inherit;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #9ca3af;
+  resize: vertical;
+}
+
+.assistant-actions {
+  display: flex;
+  justify-content: flex-end;
+}

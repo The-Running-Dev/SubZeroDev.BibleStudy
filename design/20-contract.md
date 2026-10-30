@@ -383,7 +383,7 @@ PostgreSQL 17. Migrations are forward-only, numbered SQL files applied in a tran
 | `sync_operations` | `op_id` | index `user_id` |
 | `assistant_conversations` | `id` | index `user_id` |
 | `assistant_turns` | `id` | unique `(conversation_id, client_turn_id)`; partial unique `(conversation_id) where status in ('streaming','uncertain','dispatched','queued')` |
-| `transcript_entries` | `(conversation_id, runtime_seq)` | fk `turn_id` |
+| `transcript_entries` | `(conversation_id, runtime_session_id, runtime_seq)`; `position` identity is the `afterSeq` cursor | fk `turn_id` |
 
 Other persisted stores:
 

@@ -19,6 +19,10 @@ export interface Config {
   // Recordings, one file per SHA-256; a volume in production.
   mediaDir: string;
   aolabBaseUrl: string;
+  // Lower-cased; the only user who may use the study assistant. Null: nobody may.
+  assistantOwnerEmail: string | null;
+  // The bearer the PC connector presents on /connector. Null: every link is refused.
+  connectorToken: string | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -64,10 +68,16 @@ export function loadConfig(env: Env = process.env): Config {
     buildId: env.BUILD_ID?.trim() || 'dev',
     staticDir: env.STATIC_DIR?.trim() || 'dist/client',
     ...contentSettings(env),
+    assistantOwnerEmail: env.ASSISTANT_OWNER_EMAIL?.trim().toLowerCase() || null,
+    connectorToken: env.CONNECTOR_TOKEN?.trim() || null,
   };
 
   if (config.appSecret && config.appSecret.length < 32) problems.push('APP_SECRET must be at least 32 characters');
   if (config.ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.ownerEmail)) problems.push('OWNER_EMAIL must be an email address');
+  if (config.assistantOwnerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.assistantOwnerEmail)) {
+    problems.push('ASSISTANT_OWNER_EMAIL must be an email address');
+  }
+  if (config.connectorToken && config.connectorToken.length < 32) problems.push('CONNECTOR_TOKEN must be at least 32 characters');
   if (!Number.isInteger(config.port) || config.port <= 0) problems.push('PORT must be a positive integer');
   if (problems.length) throw new Error(`Invalid configuration: ${problems.join('; ')}`);
   return config;

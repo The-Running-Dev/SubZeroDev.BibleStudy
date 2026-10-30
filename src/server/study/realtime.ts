@@ -26,6 +26,8 @@ export interface RealtimeHub {
   setReady(connection: Connection, ready: boolean): void;
   presence(sessionId: string): Presence[];
   broadcast(sessionId: string, message: ServerMessage, except?: Connection): void;
+  // Every open connection of one user, whatever room it is in.
+  sendToUser(userId: string, message: ServerMessage): void;
   closeUser(userId: string): void;
   closeAuthSession(authSessionId: string): void;
   connections(userId: string): number;
@@ -130,6 +132,9 @@ export function createRealtimeHub(options: { emptyRoomGraceMs?: number } = {}): 
     },
     presence,
     broadcast,
+    sendToUser(userId, message) {
+      for (const c of all) if (c.userId === userId) send(c.socket, message);
+    },
     // v1 has one group, so a removed member has nothing left the channel could serve.
     closeUser(userId) {
       close([...all].filter((c) => c.userId === userId), closeNotMember, { t: 'error', error: 'not_member', retryable: false });
