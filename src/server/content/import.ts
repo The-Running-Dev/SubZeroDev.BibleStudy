@@ -2,7 +2,7 @@ import type { Clock } from '../platform/clock.ts';
 import type { Db } from '../platform/db.ts';
 import { uuidv7 } from '../platform/ids.ts';
 import { log } from '../platform/log.ts';
-import type { ContentSource } from './aolab.ts';
+import type { AoBook, ContentSource } from './aolab.ts';
 import { contentHash, normalizeChapter, serializeContent } from './normalize.ts';
 
 export interface ImportScope {
@@ -50,16 +50,30 @@ export async function runImport(deps: ImportDeps, scope: ImportScope): Promise<I
     throw new Error(`Unknown book(s) for ${scope.translationId}: ${[...wanted].filter((b) => !known.has(b)).join(', ')}`);
   }
 
+  if (books.length === 0) throw new Error(`No books to import for ${scope.translationId}`);
+
   const sourceVersions = { [scope.translationId]: { sha256: catalog.translation.sha256, books: Object.fromEntries(books.map((b) => [b.id, b.sha256])) } };
   await db.query(
     `INSERT INTO import_manifests (id, started_at, scope, source_versions, items, status) VALUES ($1, $2, $3, $4, '[]', 'running')`,
     [manifestId, clock.now(), JSON.stringify(scope), JSON.stringify(sourceVersions)],
   );
+  try {
+    return await importBooks(deps, scope, manifestId, catalog.translation.sha256, books);
+  } catch (error) {
+    // A run that stops part-way still leaves a finished manifest that says why.
+    await db
+      .query(`UPDATE import_manifests SET finished_at = $2, items = $3, status = 'failed' WHERE id = $1 AND status = 'running'`, [
+        manifestId,
+        clock.now(),
+        JSON.stringify([{ status: 'failed', reason: (error as Error).message }]),
+      ])
+      .catch(() => undefined);
+    throw error;
+  }
+}
 
-  await db.query(`UPDATE translations SET edition = $2 WHERE id = $1 AND edition IS DISTINCT FROM $2::jsonb`, [
-    scope.translationId,
-    JSON.stringify({ source: 'aolab', sha256: catalog.translation.sha256 }),
-  ]);
+async function importBooks(deps: ImportDeps, scope: ImportScope, manifestId: string, sourceSha256: string, books: AoBook[]): Promise<ImportManifestSummary> {
+  const { db, clock, source } = deps;
   for (const book of books) {
     await db.query(
       `INSERT INTO books (translation_id, book_id, name, book_order, chapters) VALUES ($1, $2, $3, $4, $5)
@@ -104,6 +118,13 @@ export async function runImport(deps: ImportDeps, scope: ImportScope): Promise<I
   for (const item of items) counts[item.status]++;
   const status = counts.failed === 0 ? 'succeeded' : counts.failed === items.length ? 'failed' : 'partial';
 
+  // The edition names a source release only once every book of it is stored.
+  if (status === 'succeeded' && !scope.books) {
+    await db.query(`UPDATE translations SET edition = $2 WHERE id = $1 AND edition IS DISTINCT FROM $2::jsonb`, [
+      scope.translationId,
+      JSON.stringify({ source: 'aolab', sha256: sourceSha256 }),
+    ]);
+  }
   await db.query(`UPDATE import_manifests SET finished_at = $2, items = $3, status = $4 WHERE id = $1`, [manifestId, clock.now(), JSON.stringify(items), status]);
-  return { manifestId, status, sourceSha256: catalog.translation.sha256, counts, items };
+  return { manifestId, status, sourceSha256, counts, items };
 }

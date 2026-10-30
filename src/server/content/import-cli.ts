@@ -23,6 +23,7 @@ const pool = createPool(url);
 try {
   const source = createAoLabSource({ baseUrl: process.env.AOLAB_BASE_URL ?? 'https://bible.helloao.org' });
   const books = values.books?.split(',').map((b) => b.trim()).filter(Boolean);
+  if (books && books.length === 0) throw new Error('--books lists no books; omit it to import every book');
   const summary = await runImport({ db: pool, clock: systemClock, source }, { translationId: 'BSB', books });
   const failed = summary.items.filter((item) => item.status === 'failed');
   console.log(JSON.stringify({ manifestId: summary.manifestId, status: summary.status, sourceSha256: summary.sourceSha256, counts: summary.counts }));

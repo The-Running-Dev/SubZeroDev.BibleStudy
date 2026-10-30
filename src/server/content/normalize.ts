@@ -19,6 +19,13 @@ function tidy(text: string): string {
     .join('\n');
 }
 
+// AO Lab splits text at footnote markers without edge whitespace: "the Omega," [note] "” says".
+// A piece that opens with closing punctuation attaches to what precedes it, even across poem lines
+// (Matthew 1:23 ends `“God with us”` [note] `).`). Otherwise a space goes between prose pieces unless
+// the last one ended with opening punctuation.
+const closes = /^[”’)\].,;:!?—]/;
+const opens = /[“‘([—]$/;
+
 // Joins a verse's segments. Lines of poetry keep their own line; prose runs together.
 export function verseText(segments: AoSegment[]): string {
   let text = '';
@@ -26,7 +33,10 @@ export function verseText(segments: AoSegment[]): string {
   for (const raw of segments) {
     const segment = segmentText(raw);
     if (!segment) continue;
-    if (text.length > 0) text += segment.poem || previousPoem ? '\n' : ' ';
+    if (text.length > 0 && !closes.test(segment.text)) {
+      if (segment.poem || previousPoem) text += '\n';
+      else if (!opens.test(text)) text += ' ';
+    }
     text += segment.text;
     previousPoem = segment.poem;
   }

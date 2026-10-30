@@ -116,6 +116,7 @@ describe('importing from a fixture source', () => {
   });
   beforeEach(async () => {
     await truncateAll(h.db);
+    await h.db.query(`UPDATE translations SET edition = NULL`);
     fixture.edition = 'e1';
     fixture.failures.clear();
     fixture.lies.clear();
@@ -159,9 +160,35 @@ describe('importing from a fixture source', () => {
     assert.ok(manifest.rows[0].finished_at);
   });
 
-  test('an unknown book is refused before anything is written', async () => {
+  test('an unknown book or an empty list is refused before anything is written', async () => {
     await assert.rejects(importAll(['JUD', 'XYZ']), /Unknown book\(s\) for BSB: XYZ/);
+    await assert.rejects(importAll([]), /No books to import for BSB/);
     assert.equal((await h.db.query('SELECT 1 FROM import_manifests')).rowCount, 0);
+  });
+
+  test('the edition names the source release only after a whole, successful import', async () => {
+    const edition = async () => (await h.db.query<{ edition: unknown }>(`SELECT edition FROM translations WHERE id = 'BSB'`)).rows[0].edition;
+    fixture.failures.set('/api/BSB/JUD/1.json', Infinity);
+    assert.equal((await importAll()).status, 'partial');
+    assert.equal(await edition(), null);
+    fixture.failures.clear();
+    assert.equal((await importAll(['JUD'])).status, 'succeeded');
+    assert.equal(await edition(), null, 'a partial-scope import does not claim the release');
+    assert.equal((await importAll()).status, 'succeeded');
+    assert.deepEqual(await edition(), { source: 'aolab', sha256: 'translation-e1' });
+  });
+
+  test('a run that throws part-way leaves its manifest failed with the reason', async () => {
+    const failing = Object.create(h.db) as typeof h.db;
+    failing.query = ((sql: string, params?: unknown[]) =>
+      sql.trimStart().startsWith('INSERT INTO books') ? Promise.reject(new Error('disk full')) : h.db.query(sql, params)) as typeof h.db.query;
+    const source = createAoLabSource({ baseUrl: fixture.url, sleep: noSleep });
+    await assert.rejects(runImport({ db: failing, clock: h.clock, source }, { translationId: 'BSB' }), /disk full/);
+    const manifest = await h.db.query('SELECT status, items, finished_at FROM import_manifests');
+    assert.equal(manifest.rowCount, 1);
+    assert.equal(manifest.rows[0].status, 'failed');
+    assert.ok(manifest.rows[0].finished_at);
+    assert.deepEqual(manifest.rows[0].items, [{ status: 'failed', reason: 'disk full' }]);
   });
 });
 
@@ -241,12 +268,15 @@ describe('Romans imported live from AO Lab', () => {
     assert.equal(view.verseCount, 32);
     assert.equal(view.verses.length, 32);
 
-    const words = (s: string) => s.replace(/\s+/g, ' ').trim();
+    // Same characters in the same order; spacing is the normaliser's (unit-tested) job, except that
+    // no space may come before closing punctuation.
+    const letters = (s: string) => s.replace(/\s+/g, '');
     const sourceVerses = source.chapter.content.flatMap((c) => (c.type === 'verse' ? [c] : []));
     assert.equal(sourceVerses.length, 32);
     for (const [i, verse] of sourceVerses.entries()) {
-      const text = verse.content.map((seg) => (typeof seg === 'string' ? seg : 'text' in seg ? seg.text : '')).join(' ');
-      assert.equal(words(view.verses[i].text), words(text), `verse ${i + 1}`);
+      const text = verse.content.map((seg) => (typeof seg === 'string' ? seg : 'text' in seg ? seg.text : '')).join('');
+      assert.equal(letters(view.verses[i].text), letters(text), `verse ${i + 1}`);
+      assert.doesNotMatch(view.verses[i].text, /\s[”’),.;:!?]/, `verse ${i + 1}`);
     }
 
     const stored = (await h.db.query<{ content: string }>(`SELECT content FROM chapters WHERE book_id = 'ROM' AND chapter = 1`)).rows[0].content;

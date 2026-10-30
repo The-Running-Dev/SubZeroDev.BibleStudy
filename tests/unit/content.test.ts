@@ -24,8 +24,17 @@ describe('S2.3 parseReference', () => {
     assert.deepEqual(parseReference('Philem 1'), { bookId: 'PHM', chapter: 1, startVerse: null, endVerse: null });
   });
 
-  test('rejects unknown books, ambiguous prefixes, chapter 0 and backward ranges', () => {
-    for (const input of ['', 'Romans', 'Hezekiah 1', 'J 1', 'Romans 0', 'Romans 3:15-12', 'Romans 3:0']) {
+  test('a lone number past 1 in a one-chapter book is a verse', () => {
+    assert.deepEqual(parseReference('Jude 5'), { bookId: 'JUD', chapter: 1, startVerse: 5, endVerse: 5 });
+    assert.deepEqual(parseReference('Obadiah 3'), { bookId: 'OBA', chapter: 1, startVerse: 3, endVerse: 3 });
+    assert.deepEqual(parseReference('3 John 4'), { bookId: '3JN', chapter: 1, startVerse: 4, endVerse: 4 });
+    assert.deepEqual(parseReference('Jude 1'), { bookId: 'JUD', chapter: 1, startVerse: null, endVerse: null });
+    assert.deepEqual(parseReference('Jude 1:5'), { bookId: 'JUD', chapter: 1, startVerse: 5, endVerse: 5 });
+    assert.equal(parseReference('Jude 2:1'), null);
+  });
+
+  test('rejects unknown books, ambiguous prefixes, chapter 0, backward ranges and verses past any chapter', () => {
+    for (const input of ['', 'Romans', 'Hezekiah 1', 'J 1', 'Romans 0', 'Romans 3:15-12', 'Romans 3:0', 'Romans 1:177', 'Romans 3:99999999999999999999', 'Jude 177']) {
       assert.equal(parseReference(input), null, input);
     }
   });
@@ -34,7 +43,7 @@ describe('S2.3 parseReference', () => {
     for (const book of books) {
       assert.equal(parseReference(`${book.id} 1`)?.bookId, book.id, book.id);
       assert.equal(parseReference(`${book.name} ${book.chapters}`)?.bookId, book.id, book.name);
-      assert.equal(parseReference(`${book.name} ${book.chapters + 1}`), null, `${book.name} past its last chapter`);
+      assert.equal(parseReference(`${book.name} ${book.chapters + 1}:1`), null, `${book.name} past its last chapter`);
     }
   });
 
@@ -73,6 +82,21 @@ function chapter(content: AoChapter['chapter']['content'], footnotes: AoChapter[
 describe('normalizing AO Lab chapters', () => {
   test('prose segments run together; footnote markers carry no text', () => {
     assert.equal(verseText(['Paul, a servant', { noteId: 1 }, ' of  Christ Jesus,', 'called to be an apostle']), 'Paul, a servant of Christ Jesus, called to be an apostle');
+  });
+
+  test('a footnote marker before closing punctuation leaves no space (Revelation 1:8, John 3:3, Luke 2:49)', () => {
+    assert.equal(
+      verseText(['“I am the Alpha and the Omega,', { noteId: 3 }, '” says the Lord God, who is and was and is to come—the Almighty.']),
+      '“I am the Alpha and the Omega,” says the Lord God, who is and was and is to come—the Almighty.',
+    );
+    assert.equal(verseText(['unless he is born again.', { noteId: 9 }, '”']), 'unless he is born again.”');
+    assert.equal(verseText(['in My Father’s house', { noteId: 4 }, '?”']), 'in My Father’s house?”');
+    assert.equal(verseText(['saying,', { noteId: 2 }, '“Write on a scroll']), 'saying, “Write on a scroll');
+    assert.equal(verseText(['Him—', { noteId: 2 }, 'even those']), 'Him—even those');
+    assert.equal(
+      verseText([{ text: 'and they will call Him Immanuel”', poem: 1 }, { noteId: 4 }, { text: '(which means, “God with us”', poem: 2 }, { noteId: 5 }, { text: ').', poem: 2 }]),
+      'and they will call Him Immanuel”\n(which means, “God with us”).',
+    );
   });
 
   test('poetry keeps one line per poem segment, and text after a poem line starts a new line', () => {

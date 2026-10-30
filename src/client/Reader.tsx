@@ -36,20 +36,24 @@ export function Reader() {
     };
   }, [translationId, at.bookId, at.chapter]);
 
-  // A jump to a verse scrolls it into view once the chapter is on screen; a plain chapter starts at the top.
+  const shown = text.kind === 'ready' && text.chapter.bookId === at.bookId && text.chapter.chapter === at.chapter ? text.chapter : null;
+
+  // A jump to a verse scrolls it into view once its chapter is on screen; a plain chapter starts at the top.
+  // `at` is a new object on every jump, so entering the same reference again scrolls back to it.
   useEffect(() => {
-    if (text.kind !== 'ready') return;
+    if (!shown) return;
     const target = at.startVerse === null ? null : document.getElementById(`v-${at.startVerse}`);
     if (target) target.scrollIntoView({ block: 'center' });
     else window.scrollTo({ top: 0 });
-  }, [text, at.startVerse]);
+    if (at.startVerse !== null && !target) setEntryError(`${formatReference({ ...at, startVerse: null, endVerse: null })} has ${shown.verseCount} verses.`);
+  }, [shown, at]);
 
   const book = bookById(at.bookId)!;
   const notice = translations.find((t) => t.id === translationId)?.copyrightNotice;
   const previous = adjacentChapter(at, -1);
   const next = adjacentChapter(at, 1);
   const go = (bookId: string, chapter: number) => setAt({ bookId, chapter, startVerse: null, endVerse: null });
-  const marked = (verse: number) => at.startVerse !== null && verse >= at.startVerse && verse <= (at.endVerse ?? at.startVerse);
+  const marked = (verse: number) => shown !== null && at.startVerse !== null && verse >= at.startVerse && verse <= (at.endVerse ?? at.startVerse);
 
   function jump(event: FormEvent) {
     event.preventDefault();

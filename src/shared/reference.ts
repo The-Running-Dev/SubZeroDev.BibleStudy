@@ -25,20 +25,27 @@ function resolveBook(text: string): string | null {
 
 const pattern = /^(.*?[a-z].*?)\s*(\d+)(?:\s*:\s*(\d+)(?:\s*[-–]\s*(\d+))?)?$/;
 
-// Parses "Romans 3:12", "rom 3", "Romans 3:12-15" or "1 Cor 13:4". Null when the book is unknown,
-// the chapter is outside the book, or a range runs backwards.
+// No chapter has more verses than Psalm 119.
+export const maxVerse = 176;
+
+// Parses "Romans 3:12", "rom 3", "Romans 3:12-15" or "1 Cor 13:4". In a one-chapter book a lone number
+// past 1 is a verse: "Jude 5" is Jude 1:5. Null when the book is unknown, the chapter is outside the
+// book, a verse is past any chapter's end, or a range runs backwards.
 export function parseReference(input: string): PassageRef | null {
   const match = pattern.exec(normalize(input));
   if (!match) return null;
   const bookId = resolveBook(match[1]);
   if (!bookId) return null;
-  const chapter = Number(match[2]);
   const book = books.find((b) => b.id === bookId)!;
+  let [chapterText, startText] = [match[2], match[3]];
+  const endText = match[4];
+  if (book.chapters === 1 && startText === undefined && Number(chapterText) > 1) [chapterText, startText] = ['1', chapterText];
+  const chapter = Number(chapterText);
   if (chapter < 1 || chapter > book.chapters) return null;
-  if (match[3] === undefined) return { bookId, chapter, startVerse: null, endVerse: null };
-  const startVerse = Number(match[3]);
-  const endVerse = match[4] === undefined ? startVerse : Number(match[4]);
-  if (startVerse < 1 || endVerse < startVerse) return null;
+  if (startText === undefined) return { bookId, chapter, startVerse: null, endVerse: null };
+  const startVerse = Number(startText);
+  const endVerse = endText === undefined ? startVerse : Number(endText);
+  if (startVerse < 1 || endVerse < startVerse || endVerse > maxVerse) return null;
   return { bookId, chapter, startVerse, endVerse };
 }
 

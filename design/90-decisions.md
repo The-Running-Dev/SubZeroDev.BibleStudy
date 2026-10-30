@@ -13,6 +13,14 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - **Chosen:** `chapters.content` is `text` holding canonical JSON (`verses`, `headings`, `footnotes`, keys in a fixed order). The chapter endpoint splices those bytes into the response unchanged, and its ETag is the hash, so an unchanged chapter costs a 304. The import writes a row only when the hash differs (`ON CONFLICT … WHERE content_sha256 <> excluded.content_sha256`), which is how a re-run changes no rows.
 - **Chosen:** AO Lab's structure is flattened on import. A verse is one string. Poetry lines are separated by newlines and shown with `white-space: pre-line`. Section headings and Psalm superscriptions become `headings` keyed to the verse they precede. Footnote markers are dropped from the text and footnotes are listed per verse. Footnotes attached to a whole chapter are dropped. A chapter whose verse count disagrees with the source's `numberOfVerses` fails alone; the run is then `partial`.
 - **Chosen:** browser tests use the `playwright` library under `node:test`, the same runner as every other suite, against the real server and the built client.
+- **Hardening from review:**
+  - **Joining text pieces.** AO Lab splits text at footnote markers and the pieces carry no edge whitespace. A piece that opens with closing punctuation therefore attaches to the text before it, so Revelation 1:8 reads `Omega,” says`, not `Omega, ” says`. Any other two prose pieces get a single space between them.
+  - **Edition.** The translation's `edition` is set only after a whole-translation import succeeds.
+  - **Failed runs.** A run that throws part-way marks its manifest `failed` with the reason.
+  - **Empty book lists.** An empty `--books` list is refused.
+  - **One-chapter books.** In a one-chapter book a lone number past 1 is a verse: `Jude 5` means Jude 1:5.
+  - **Verse limit.** References accept verses up to 176, the length of Psalm 119. A verse past the chapter's end tells the reader how many verses the chapter has.
+  - **ETag for cached text.** When cached text carries an expiry, the ETag includes it.
 - **Rejected:** `jsonb` content with a hash of `content::text`. That hash would change with Postgres's serialisation, not with the text.
 - **Rejected:** `@playwright/test`. A second runner and config for five tests.
 

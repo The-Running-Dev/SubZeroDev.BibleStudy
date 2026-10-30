@@ -103,6 +103,21 @@ describe('the reader', () => {
     if (process.env.E2E_SCREENSHOTS) await page.screenshot({ path: `${process.env.E2E_SCREENSHOTS}/romans-3-12.png` });
   });
 
+  test('entering the same reference again scrolls back to it; a verse past the chapter says how many there are', async () => {
+    await expectReference('Romans 1');
+    await jump('Romans 1:20');
+    await expectReference('Romans 1:20');
+    await page.waitForFunction(() => window.scrollY > 0);
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
+    await jump('Romans 1:20');
+    await page.waitForFunction(() => window.scrollY > 0);
+    assert.equal(await page.locator('.verse.marked').count(), 1);
+
+    await jump('Romans 1:40');
+    await page.getByRole('alert').getByText('Romans 1 has 32 verses.').waitFor();
+    assert.equal(await page.locator('.verse.marked').count(), 0);
+  });
+
   test('a reference that is not one says so and stays put', async () => {
     await expectReference('Romans 1');
     await jump('Romans 17');

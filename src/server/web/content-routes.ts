@@ -14,7 +14,7 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
     const params = request.params as { translation: string; book: string; chapter: string };
     const chapter = /^\d{1,3}$/.test(params.chapter) ? Number(params.chapter) : NaN;
     const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter);
-    const etag = `"${stored.contentSha256}"`;
+    const etag = stored.etag;
     reply.header('etag', etag).header('cache-control', 'private, no-cache');
     if (request.headers['if-none-match'] === etag) return reply.status(304).send();
     return reply.type('application/json; charset=utf-8').send(stored.body);

@@ -51,6 +51,8 @@ export async function listBooks(db: Queryable, translationId: TranslationId): Pr
 
 export interface StoredChapter {
   contentSha256: string;
+  // Validator for the whole body: the content hash, plus the expiry when cached text carries one (CSB).
+  etag: string;
   // The response body: ChapterView with the stored content spliced in byte for byte (I-10).
   body: string;
 }
@@ -78,5 +80,6 @@ export async function getChapter(db: Queryable, translationId: TranslationId, bo
     expiresAt: row.expires_at ? row.expires_at.toISOString() : null,
   });
   // Both are JSON objects: drop the head's closing brace and the content's opening one, and join.
-  return { contentSha256: row.content_sha256, body: `${head.slice(0, -1)},${row.content.slice(1)}` };
+  const etag = row.expires_at ? `"${row.content_sha256}-${row.expires_at.getTime()}"` : `"${row.content_sha256}"`;
+  return { contentSha256: row.content_sha256, etag, body: `${head.slice(0, -1)},${row.content.slice(1)}` };
 }
