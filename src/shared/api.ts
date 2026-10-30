@@ -34,6 +34,9 @@ export type ErrorCode =
   | 'not_member'
   | 'not_owner'
   | 'no_active_session'
+  | 'assistant_not_permitted'
+  | 'assistant_offline'
+  | 'turn_in_progress'
   | 'internal';
 
 export interface ApiError {
@@ -227,9 +230,75 @@ export type ServerMessage =
   | { t: 'state'; state: PlaybackState }
   | { t: 'result'; commandId: Uuid; outcome: CommandOutcome; state: PlaybackState; reason?: string }
   | { t: 'presence'; presence: Presence[] }
+  | { t: 'assistant'; event: AssistantEvent }
   | { t: 'error'; error: ErrorCode; retryable: boolean };
 
 // Close codes the server ends a connection with. The client reconnects after none of them.
 export const closeNotMember = 4403;
 export const closeSignedOut = 4401;
 export const closeTooMany = 4429;
+
+// ---- assistant ----
+
+export type AssistantStatus = { state: 'online'; runtimeVersion: string } | { state: 'offline'; since: IsoInstant | null } | { state: 'not_permitted' };
+export type AssistantTurnStatus = 'queued' | 'dispatched' | 'streaming' | 'completed' | 'interrupted' | 'failed' | 'uncertain';
+export type AssistantEvent =
+  | { kind: 'delta'; turnId: Uuid; seq: number; text: string }
+  | { kind: 'message'; turnId: Uuid; seq: number; text: string }
+  | { kind: 'turn_status'; turnId: Uuid; status: AssistantTurnStatus; failure?: string };
+
+export interface AssistantTurnView {
+  id: Uuid;
+  prompt: string;
+  status: AssistantTurnStatus;
+  failure?: string;
+}
+
+export interface AssistantTranscript {
+  turns: AssistantTurnView[];
+  entries: AssistantEvent[];
+}
+
+export interface SendTurnRequest {
+  clientTurnId: Uuid;
+  prompt: string;
+  context: { translationId: TranslationId; ref: PassageRef; noteIds: Uuid[] };
+}
+
+export interface SendTurnResponse {
+  turnId: Uuid;
+  status: AssistantTurnStatus;
+  existing: boolean;
+}
+
+export const terminalTurnStatuses: readonly AssistantTurnStatus[] = ['completed', 'interrupted', 'failed'];
+
+// The connector link (/connector). None of it reaches a browser (I-25).
+export type ServerToConnector =
+  | { t: 'dispatch'; turnId: Uuid; conversationId: Uuid; runtimeSessionId: string | null; text: string }
+  | { t: 'interrupt'; turnId: Uuid; runtimeSessionId: string; runtimeTurnId: string }
+  | { t: 'resume'; conversationId: Uuid; runtimeSessionId: string; fromSeq: number }
+  | { t: 'ping' };
+
+// An event's `runtimeTurnId` names the runtime turn, for events that arrive before `accepted`; runtime turn ids
+// and seqs are unique only within `runtimeSessionId`.
+// `resumed` answers a resume once every missed event was resent: whether the session still exists and
+// which runtime turn is still open in it.
+export type ConnectorToServer =
+  | { t: 'hello'; runtimeVersion: string; provider: string; sandbox: string | null }
+  | { t: 'session'; conversationId: Uuid; runtimeSessionId: string }
+  | { t: 'accepted'; turnId: Uuid; runtimeSessionId: string; runtimeTurnId: string }
+  | {
+      t: 'event';
+      conversationId: Uuid;
+      runtimeSessionId: string;
+      seq: number;
+      turnId: Uuid | null;
+      runtimeTurnId?: string;
+      kind: 'delta' | 'message' | 'status' | 'tool_attempt';
+      text?: string;
+      status?: AssistantTurnStatus;
+    }
+  | { t: 'resumed'; conversationId: Uuid; sessionFound: boolean; activeRuntimeTurnId: string | null }
+  | { t: 'failed'; turnId: Uuid; reason: string; retryable: false }
+  | { t: 'pong' };

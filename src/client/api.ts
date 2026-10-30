@@ -1,6 +1,9 @@
 import type {
   AcceptInvitationResponse,
   ApiError,
+  AssistantStatus,
+  AssistantTranscript,
+  AssistantTurnStatus,
   CreatedInvitation,
   GroupSummary,
   GroupView,
@@ -11,6 +14,8 @@ import type {
   Profile,
   ProfilePatch,
   RequestCodeResponse,
+  SendTurnRequest,
+  SendTurnResponse,
   StudySessionResponse,
   TranslationId,
   TranslationView,
@@ -67,6 +72,15 @@ export const api = {
   startSession: (groupId: string) => call<StudySessionResponse>('POST', `/api/groups/${groupId}/session`),
   // 404 `no_active_session` when nobody has started one.
   activeSession: (groupId: string) => call<StudySessionResponse>('GET', `/api/groups/${groupId}/session`),
+  assistantStatus: () => call<AssistantStatus>('GET', '/api/assistant/status'),
+  latestConversation: () => call<{ id: string | null }>('GET', '/api/assistant/conversations'),
+  createConversation: () => call<{ id: string }>('POST', '/api/assistant/conversations'),
+  // The turns, and the transcript entries after position `afterSeq`.
+  assistantTranscript: (conversationId: string, afterSeq: number) =>
+    call<AssistantTranscript>('GET', `/api/assistant/conversations/${conversationId}?afterSeq=${afterSeq}`),
+  // 200 with `existing: true` when this clientTurnId was sent before.
+  sendTurn: (conversationId: string, request: SendTurnRequest) => call<SendTurnResponse>('POST', `/api/assistant/conversations/${conversationId}/turns`, request),
+  interruptTurn: (turnId: string) => call<{ status: AssistantTurnStatus }>('POST', `/api/assistant/turns/${turnId}/interrupt`),
 };
 
 export function messageFor(error: unknown): string {

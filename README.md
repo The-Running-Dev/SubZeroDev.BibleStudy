@@ -54,9 +54,23 @@ A private Bible-study app for a small group: shared narrated reading, questions 
 
    A member of the group sees **Study** next to the group name. **Start study** opens the group's one live session at its current passage (Romans 1 to begin with); anyone who arrives later gets **Join study**, and two people starting at once land in the same session. Everyone in the session hears the same narration at the same point: any member can play, pause, skip ±10 s, scrub, change the passage, narrator or speed, or end the study, and the status line names who paused. Each phone corrects its own drift against the server clock. A phone that drops its connection reconnects by itself and picks up the current state; anything tapped while it was offline is not sent. With CSB as the shared translation there is no narration, so the study runs as reading together: a tap on a verse marks it for everyone. The session keeps going when its starter leaves; once nobody is connected for 20 s it pauses, and a server restart leaves it paused where it was.
 
+9. **Study assistant (optional)**
+
+   The owner can ask Skynet about the passage on screen. The model runs on the owner's PC under the AgentConsole runtime; a small connector there dials out to the server, so the PC needs no open port and the server never holds model credentials. Set `ASSISTANT_OWNER_EMAIL` (only that member sees the panel) and `CONNECTOR_TOKEN` (32+ random characters) on the server. On the PC, with the Claude CLI signed in, set the same `CONNECTOR_TOKEN`, `CONNECTOR_SERVER_URL` and `AGENTCONSOLE_RUNTIME` (the runtime's `main.js`), then:
+   ```bash
+   npm run connector
+   ```
+   The connector starts the runtime, keeps its state in `CONNECTOR_STATE_DIR` (default `data/connector`), and gives each conversation its own empty working directory there. Claude runs with every tool, MCP server and user setting removed, and a turn that still asks for a tool is denied, stopped and shown as such. With the PC off or the connector stopped, the panel says the assistant is offline; reading and narration are unaffected. A connector restarted mid-answer resumes the runtime's event log, so the answer is neither lost nor shown twice.
+
 ## Integration and browser tests
 
 `npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services` and empties their tables, so re-import afterwards. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`. The content tests import Romans from the live AO Lab API (`AOLAB_BASE_URL` overrides it), so they need network access; import failures and retries are tested against a local fixture server.
+
+The assistant tests drive the real connector code against a fake AgentConsole runtime. To run S6.1 and S6.5 against the real runtime and model (a few model turns), point `AGENTCONSOLE_RUNTIME` at it with the Claude CLI signed in:
+```bash
+AGENTCONSOLE_RUNTIME=C:/path/to/agent-console/runtime/main.js node --test tests/integration/assistant-runtime.test.ts
+```
+Without it, that file is skipped.
 
 `npm run test:e2e` drives the built client in headless Chromium at phone size. Run `npm run build` and, once, `npx playwright install chromium` first. Set `E2E_SCREENSHOTS` to a directory to keep screenshots. The study tests play Romans 1 on three clients for two minutes and print the drift report.
 

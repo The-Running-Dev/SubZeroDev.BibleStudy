@@ -331,7 +331,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
    - on `replay_gap` it reads the missing range;
    - the turn then settles to its real terminal state;
    - it is never resent.
-8. Every `permissions.request` from the runtime is answered `deny`. Any tool-execution event aborts the turn as `failed: tool_attempt` (DOD-22).
+8. Every `permission.request` from the runtime is answered `deny`. Any tool-execution event aborts the turn as `failed: tool_attempt` (DOD-22).
 
 ## Distribution
 
@@ -437,7 +437,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 - Users see: "Connection lost — checking whether the answer finished".
 
 **Runtime asks for a tool or permission**
-- Detected by: a `permissions.request` or tool event.
+- Detected by: a `permission.request` or tool event.
 - System: deny; then interrupt and fail the turn.
 - Users see: "The assistant tried to use a tool; this turn was stopped".
 - Left behind: the turn is `failed: tool_attempt`.

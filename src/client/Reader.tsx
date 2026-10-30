@@ -4,6 +4,7 @@ import type { ChapterView, PassageRef, TranslationId, TranslationView } from '..
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
+import { AssistantPanel } from './Assistant.tsx';
 import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
 
@@ -123,6 +124,8 @@ export function Reader() {
           {next ? `${bookById(next.bookId)!.name} ${next.chapter}` : 'Next'} ›
         </button>
       </nav>
+
+      <AssistantPanel translationId={translationId} at={at} />
     </>
   );
 }

@@ -118,7 +118,7 @@ Acceptance:
 Out of scope: questions in the session (S8); wrap-up and stopping point (S9); voice (out of v1).
 
 ## S6 — Ask the study assistant about a passage
-Status: todo
+Status: done
 Delivers: The owner can ask Skynet about the passage they are reading and watch the answer stream in. They can stop it, come back later to the same conversation, and still read and listen when the PC is off.
 Touches: assistant (conversations, turns, transcript, `/connector`), connector process (AgentConsole over stdio), client assistant panel
 Depends on: S2

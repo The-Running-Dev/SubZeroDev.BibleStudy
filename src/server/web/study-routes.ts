@@ -20,6 +20,8 @@ const burst = 30;
 const refillPerSecond = 10;
 // A connection that sends nothing (clients ping every 5 s) for this long is gone.
 const heartbeatTimeoutMs = 15_000;
+// The server's WebSocket limit is sized for the connector; a browser message is never this large.
+const maxMessageBytes = 64 * 1024;
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -139,7 +141,12 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
         clearInterval(heartbeat);
         hub.remove(connection);
       });
-      socket.on('message', (raw) => {
+      socket.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
+        const size = Array.isArray(raw) ? raw.reduce((n, part) => n + part.length, 0) : raw.byteLength;
+        if (size > maxMessageBytes) {
+          socket.close(1009, 'message_too_big');
+          return;
+        }
         lastHeard = Date.now();
         const now = Date.now();
         tokens = Math.min(burst, tokens + ((now - refilledAt) / 1000) * refillPerSecond);

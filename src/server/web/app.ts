@@ -12,6 +12,7 @@ import type { Db } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { log } from '../platform/log.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
+import { registerAssistantRoutes } from './assistant-routes.ts';
 import { registerContentRoutes } from './content-routes.ts';
 import { registerGroupRoutes } from './group-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
@@ -62,7 +63,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify(options);
 
   await app.register(fastifyCookie);
-  await app.register(fastifyWebsocket, { options: { maxPayload: 64 * 1024 } });
+  // Sized for the connector's link, which carries whole answers; /ws enforces its own smaller limit.
+  await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
   app.decorateRequest('auth', null);
 
   app.addHook('onRequest', async (request, reply) => {
@@ -109,6 +111,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerContentRoutes(app, deps);
   registerGroupRoutes(app, deps, hub);
   registerStudyRoutes(app, deps, hub);
+  registerAssistantRoutes(app, deps, hub);
 
   const staticRoot = resolve(config.staticDir);
   const hasClient = existsSync(resolve(staticRoot, 'index.html'));
