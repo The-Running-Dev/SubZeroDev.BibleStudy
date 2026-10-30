@@ -67,6 +67,12 @@ jobs:
         run: npm run test:integration
 
       # verification: true
+      - name: Browser tests (Chromium, phone viewport)
+        run: |
+          npx playwright install chromium --with-deps
+          npm run test:e2e
+
+      # verification: true
       - name: Container builds and serves its build id
         run: |
           docker build --build-arg BUILD_ID=ci-${{ github.sha }} -t biblestudy:ci .

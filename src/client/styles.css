@@ -69,3 +69,95 @@ button:disabled {
 [role='alert'] {
   color: #dc2626;
 }
+
+.reader {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
+}
+
+.account-toggle {
+  display: block;
+  margin: max(0.5rem, env(safe-area-inset-top)) 0 0 auto;
+}
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #9ca3af;
+}
+
+.reader-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: Canvas;
+  padding: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-bottom: 1px solid #9ca3af;
+}
+
+.reader-bar h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.reader-controls,
+.reader-jump {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.reader-controls select:nth-child(2),
+.reader-jump input {
+  flex: 1;
+  min-width: 0;
+}
+
+.reader-jump {
+  flex-direction: row;
+}
+
+.passage {
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
+
+.passage-heading {
+  font-size: 1rem;
+  margin: 1.5rem 0 0.25rem;
+}
+
+.verse {
+  margin: 0.25rem 0;
+  white-space: pre-line;
+  scroll-margin-top: 12rem;
+}
+
+.verse-number {
+  font-size: 0.7em;
+  margin-right: 0.25em;
+  color: #6b7280;
+}
+
+.verse.marked {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-radius: 0.25rem;
+}
+
+.footnotes,
+.copyright {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 1rem;
+}

@@ -34,9 +34,17 @@ A private Bible-study app for a small group: shared narrated reading, questions 
    ```
    The server applies migrations on start. Open http://localhost:5173 and sign in with any address; the code arrives in Mailpit.
 
-## Integration tests
+5. **Import the Bible text**
+   ```bash
+   node --env-file=.env src/server/content/import-cli.ts --translation BSB
+   ```
+   This copies the Berean Standard Bible (public domain) from the AO Lab Free Use Bible API into Postgres: 66 books, 1,189 chapters, about a minute. `--books ROM,1CO` limits it. Re-running it changes only chapters whose text changed, and every run is recorded in `import_manifests`. The exit code is 2 when any chapter failed; the JSON summary names them. The reader opens at Romans 1. CSB shows as not available until it has a licensed source.
 
-`npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services`. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`.
+## Integration and browser tests
+
+`npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services` and empties their tables, so re-import afterwards. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`. The content tests import Romans from the live AO Lab API (`AOLAB_BASE_URL` overrides it), so they need network access; import failures and retries are tested against a local fixture server.
+
+`npm run test:e2e` drives the built client in headless Chromium at phone size. Run `npm run build` and, once, `npx playwright install chromium` first. Set `E2E_SCREENSHOTS` to a directory to keep screenshots.
 
 ## Container
 
@@ -45,7 +53,7 @@ docker build --build-arg BUILD_ID=$(git rev-parse --short HEAD) -t biblestudy .
 docker run -p 3000:3000 -e DATABASE_URL=... -e APP_SECRET=... -e SMTP_URL=... biblestudy
 ```
 
-`GET /__build-id` returns the running build. See `.env.example` for every variable.
+`GET /__build-id` returns the running build. See `.env.example` for every variable. Import the text inside the running container with `docker exec <container> node src/server/content/import-cli.ts --translation BSB`.
 
 <!-- BEGIN project-commands -->
 ## Install

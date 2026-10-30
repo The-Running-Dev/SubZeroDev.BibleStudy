@@ -1,4 +1,14 @@
-import type { ApiError, CodeDelivery, Profile, ProfilePatch, RequestCodeResponse, VerifyCodeResponse } from '../shared/api.ts';
+import type {
+  ApiError,
+  ChapterView,
+  CodeDelivery,
+  Profile,
+  ProfilePatch,
+  RequestCodeResponse,
+  TranslationId,
+  TranslationView,
+  VerifyCodeResponse,
+} from '../shared/api.ts';
 
 export class ApiFailure extends Error {
   readonly status: number;
@@ -33,6 +43,8 @@ export const api = {
   logout: () => call<void>('POST', '/api/auth/logout'),
   me: () => call<Profile>('GET', '/api/me'),
   updateMe: (patch: ProfilePatch) => call<Profile>('PATCH', '/api/me', patch),
+  translations: () => call<TranslationView[]>('GET', '/api/content/translations'),
+  chapter: (translationId: TranslationId, bookId: string, chapter: number) => call<ChapterView>('GET', `/api/content/${translationId}/${bookId}/${chapter}`),
 };
 
 export function messageFor(error: unknown): string {

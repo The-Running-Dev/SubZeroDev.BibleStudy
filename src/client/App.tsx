@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Profile } from '../shared/api.ts';
 import { ApiFailure, api } from './api.ts';
 import { ProfileForm } from './ProfileForm.tsx';
+import { Reader } from './Reader.tsx';
 import { SignIn } from './SignIn.tsx';
 
 type State = { kind: 'loading' } | { kind: 'signed-out' } | { kind: 'setup'; profile: Profile } | { kind: 'home'; profile: Profile } | { kind: 'error'; message: string };
@@ -44,7 +45,9 @@ export function App() {
   }
 }
 
+// Home is the reader; the account sits behind a menu so the text keeps the screen.
 function Home(props: { profile: Profile; onChange: (profile: Profile) => void; onSignedOut: () => void }) {
+  const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
 
   async function signOut() {
@@ -53,27 +56,34 @@ function Home(props: { profile: Profile; onChange: (profile: Profile) => void; o
   }
 
   return (
-    <main className="screen">
-      <h1>Bible Study</h1>
-      <p>
-        Signed in as <strong>{props.profile.displayName}</strong> ({props.profile.email}), {props.profile.timeZone}.
-      </p>
-      {editing ? (
-        <ProfileForm
-          profile={props.profile}
-          onSaved={(profile) => {
-            props.onChange(profile);
-            setEditing(false);
-          }}
-        />
-      ) : (
-        <button type="button" onClick={() => setEditing(true)}>
-          Edit profile
-        </button>
-      )}
-      <button type="button" className="secondary" onClick={signOut}>
-        Sign out
+    <div className="reader">
+      <button type="button" className="link account-toggle" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+        {props.profile.displayName}
       </button>
-    </main>
+      {menu && (
+        <section className="account" aria-label="Account">
+          <p>
+            Signed in as <strong>{props.profile.displayName}</strong> ({props.profile.email}), {props.profile.timeZone}.
+          </p>
+          {editing ? (
+            <ProfileForm
+              profile={props.profile}
+              onSaved={(profile) => {
+                props.onChange(profile);
+                setEditing(false);
+              }}
+            />
+          ) : (
+            <button type="button" onClick={() => setEditing(true)}>
+              Edit profile
+            </button>
+          )}
+          <button type="button" className="secondary" onClick={signOut}>
+            Sign out
+          </button>
+        </section>
+      )}
+      <Reader />
+    </div>
   );
 }

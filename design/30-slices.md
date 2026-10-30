@@ -41,7 +41,7 @@ Acceptance:
 Out of scope: invitations and groups (S4); reminder emails (S11); any styling beyond a usable sign-in screen.
 
 ## S2 — Read the Bible and find a passage
-Status: todo
+Status: done
 Delivers: A signed-in member opens the app at Romans 1 in the BSB. They can move to any book and chapter, type a reference such as "Romans 3:12" to jump there, and always see where they are.
 Touches: content (translations, chapters, import CLI, catalog/chapter API, `parseReference`), client reader
 Depends on: S1
