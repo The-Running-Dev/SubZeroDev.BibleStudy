@@ -46,6 +46,10 @@ A private Bible-study app for a small group: shared narrated reading, questions 
    ```
    This stores AO Lab's public-domain (CC0) recordings by Bob Souer and Barry Hays in `MEDIA_DIR` (default `data/media`), one file per chapter and narrator, named by its SHA-256, with the per-verse timing that drives the highlight. `--audio ROM:1-16,1CO` takes several books, and `--narrators souer` limits the narrators. `--audio` alone needs the text already imported; with `--books` the text is imported first. A chapter nobody imported is fetched in the background the first time a member opens its player, so this step only warms the cache. A recording whose timing is missing or fails validation still plays, without verse following.
 
+7. **Set up the group**
+
+   Set `OWNER_EMAIL` in `.env` to the owner's address before the owner first signs in. That first sign-in creates the one group, "Bible Study", meeting Mondays at 06:15 `America/Chicago` and starting at Romans 1, owned by that user. Anyone else who signs in without an invitation has an account but no group. In the app, tap the group name, then **Create invitation link**, and send the link yourself; the app never emails invitations. Each link lets one person join and works for 14 days. The owner can revoke an open link and remove a member; a removed member's open connection is closed at once, and they need a new link to come back.
+
 ## Integration and browser tests
 
 `npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services` and empties their tables, so re-import afterwards. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`. The content tests import Romans from the live AO Lab API (`AOLAB_BASE_URL` overrides it), so they need network access; import failures and retries are tested against a local fixture server.
@@ -56,7 +60,7 @@ A private Bible-study app for a small group: shared narrated reading, questions 
 
 ```bash
 docker build --build-arg BUILD_ID=$(git rev-parse --short HEAD) -t biblestudy .
-docker run -p 3000:3000 -e DATABASE_URL=... -e APP_SECRET=... -e SMTP_URL=... biblestudy
+docker run -p 3000:3000 -e DATABASE_URL=... -e APP_SECRET=... -e SMTP_URL=... -e OWNER_EMAIL=... biblestudy
 ```
 
 `GET /__build-id` returns the running build. See `.env.example` for every variable. Import the text inside the running container with `docker exec <container> node src/server/content/import-cli.ts --translation BSB`. Mount a volume at `/app/data/media` (the image's `MEDIA_DIR`) so recordings survive a new container.

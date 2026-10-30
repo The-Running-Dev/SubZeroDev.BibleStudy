@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyServerOptions } from 'fastify';
 import type { Outbox } from '../mail/outbox.ts';
@@ -12,9 +13,12 @@ import { AppError } from '../platform/errors.ts';
 import { log } from '../platform/log.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
 import { registerContentRoutes } from './content-routes.ts';
+import { registerGroupRoutes } from './group-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
+import type { RealtimeHub } from '../study/realtime.ts';
+import { createRealtimeHub } from '../study/realtime.ts';
 
 // API paths reachable without a session. Recordings under /media/ need one too.
 const publicApiPaths = new Set(['/api/auth/code', '/api/auth/verify', '/api/auth/code-status']);
@@ -44,6 +48,8 @@ export interface AppDeps {
   onEmailQueued?: () => void;
   // Wakes the audio worker after a recording is queued for on-demand import.
   onAudioQueued?: () => void;
+  // Open realtime connections; tests pass their own to watch them.
+  hub?: RealtimeHub;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -55,6 +61,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify(options);
 
   await app.register(fastifyCookie);
+  await app.register(fastifyWebsocket, { options: { maxPayload: 64 * 1024 } });
   app.decorateRequest('auth', null);
 
   app.addHook('onRequest', async (request, reply) => {
@@ -62,7 +69,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // "/%61pi/me" reaches the /api/me handler while its raw URL does not start with /api/.
     // Unmatched paths are judged by their decoded form, so an unknown /api/ path is refused before it 404s.
     const route = request.routeOptions.url ?? decodedPath(request.url);
-    if (!(route.startsWith('/api/') || route.startsWith('/media/')) || publicApiPaths.has(route)) return;
+    const protectedRoute = route.startsWith('/api/') || route.startsWith('/media/') || route === '/ws';
+    if (!protectedRoute || publicApiPaths.has(route)) return;
     const auth = await authenticate(deps.db, deps.clock, request.cookies[sessionCookie]);
     if (!auth) throw new AppError('unauthenticated', 401, 'Sign in to continue.');
     request.auth = auth;
@@ -96,6 +104,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   registerIdentityRoutes(app, deps);
   registerContentRoutes(app, deps);
+  registerGroupRoutes(app, deps, deps.hub ?? createRealtimeHub());
 
   const staticRoot = resolve(config.staticDir);
   const hasClient = existsSync(resolve(staticRoot, 'index.html'));
