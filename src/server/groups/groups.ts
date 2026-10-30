@@ -138,16 +138,18 @@ export async function revokeInvitation(db: Queryable, clock: Clock, userId: stri
 }
 
 // Removal keeps the row with `removed_at`; the member needs a new invitation to come back.
-export async function removeMember(db: Queryable, clock: Clock, userId: string, groupId: unknown, memberId: unknown): Promise<void> {
+// Returns the removed user's id as stored, which may differ in case from the path's.
+export async function removeMember(db: Queryable, clock: Clock, userId: string, groupId: unknown, memberId: unknown): Promise<string> {
   await requireOwner(db, userId, groupId);
-  if (memberId === userId) throw new AppError('invalid_request', 400, 'The owner cannot be removed.');
+  if (typeof memberId === 'string' && memberId.toLowerCase() === userId) throw new AppError('invalid_request', 400, 'The owner cannot be removed.');
   const removed = isUuid(memberId)
-    ? await db.query(
-        `UPDATE memberships SET removed_at = $3 WHERE group_id = $1 AND user_id = $2 AND role = 'member' AND removed_at IS NULL`,
+    ? await db.query<{ user_id: string }>(
+        `UPDATE memberships SET removed_at = $3 WHERE group_id = $1 AND user_id = $2 AND role = 'member' AND removed_at IS NULL RETURNING user_id`,
         [groupId, memberId, clock.now()],
       )
-    : { rowCount: 0 };
+    : { rowCount: 0, rows: [] };
   if (!removed.rowCount) throw new AppError('not_found', 404, 'No such member.');
+  return removed.rows[0].user_id;
 }
 
 export async function invitationIdForToken(db: Queryable, token: unknown): Promise<string | null> {

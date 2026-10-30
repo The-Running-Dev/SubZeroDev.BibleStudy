@@ -43,8 +43,7 @@ export function registerGroupRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
 
   app.delete('/api/groups/:groupId/members/:userId', async (request, reply) => {
     const { groupId, userId } = request.params as Params;
-    await removeMember(deps.db, deps.clock, requireAuth(request).userId, groupId, userId);
-    hub.closeUser(userId);
+    hub.closeUser(await removeMember(deps.db, deps.clock, requireAuth(request).userId, groupId, userId));
     return reply.status(204).send();
   });
 

@@ -310,6 +310,18 @@ describe('S4.5 removing a member', () => {
     await ownerSocket.closed;
   });
 
+  test("removing a member by an upper-case id still closes that member's realtime connection", async () => {
+    const owner = await ownerWithGroup();
+    const link = await createLink(owner.cookie, owner.groupId);
+    const member = await signIn(h, 'member@example.test', link.token);
+    const memberSocket = await connect(member.cookie);
+
+    assert.equal((await del(owner.cookie, `/api/groups/${owner.groupId}/members/${member.userId.toUpperCase()}`)).statusCode, 204);
+    assert.equal(await memberSocket.closed, closeNotMember);
+    assert.equal(h.hub.connections(member.userId), 0);
+    assert.equal((await del(owner.cookie, `/api/groups/${owner.groupId}/members/${owner.userId.toUpperCase()}`)).statusCode, 400);
+  });
+
   test('a removed member needs a new link to come back, and the old one stays used', async () => {
     const owner = await ownerWithGroup();
     const link = await createLink(owner.cookie, owner.groupId);
