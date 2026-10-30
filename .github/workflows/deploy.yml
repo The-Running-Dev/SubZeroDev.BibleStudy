@@ -1,0 +1,73 @@
+name: Deploy
+
+# A merge to main publishes the image compose.yaml pulls, then (only when the owner has turned
+# deploys on) asks Portainer to redeploy the stack. docs/deploy.md has the one-time setup.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time; a newer merge supersedes a queued one rather than racing it.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/the-running-dev/subzerodev.biblestudy
+
+jobs:
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # :<sha> is what a rollback pins; :latest is what compose.yaml pulls by default.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          build-args: BUILD_ID=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: deploy
+    needs: image
+    # Off until the owner sets the repository variable DEPLOY_ENABLED to true and adds the
+    # PORTAINER_REDEPLOY_WEBHOOK_URL secret; until then a merge only publishes the image.
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Redeploy the Portainer stack
+        env:
+          REDEPLOY_WEBHOOK_URL: ${{ secrets.PORTAINER_REDEPLOY_WEBHOOK_URL }}
+        run: |
+          test -n "$REDEPLOY_WEBHOOK_URL" || { echo "PORTAINER_REDEPLOY_WEBHOOK_URL is not set"; exit 1; }
+          curl -fsS --max-time 60 -X POST "$REDEPLOY_WEBHOOK_URL" -o /dev/null
+          echo "Redeploy requested for ${{ github.sha }}"

@@ -8,6 +8,18 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S7: a one-shot migrate service, an in-stack backup service, and a drill in CI
+- **Context:** S7 needs a failed migration not to take the site down, nightly backups the owner has seen restore, and a deploy that costs nothing beyond the VPS.
+- **Chosen:**
+  - A `migrate` service runs the migrations before the app is replaced; the app depends on it completing. The app still migrates on start and exits non-zero on failure (S7.4), as a second guard.
+  - A `backup` service from the same image runs `pg_dump` (custom format) daily at `BACKUP_AT` UTC. Recordings are named by SHA-256 and never change, so each is stored once in a shared store and every run's manifest lists the ones it needs. A restore verifies every checksum before touching the database and refuses a database with users unless forced.
+  - `scripts/drill-stack.ts` runs the production `compose.yaml` with `.env.example` values and synthetic data: build id, down/up persistence, backup, restore into an empty stack, and a broken migration. CI runs it in place of the single-container check.
+  - `deploy.yml` publishes `:<sha>` and `:latest` on every merge; the Portainer webhook runs only when `DEPLOY_ENABLED` is `true`.
+- **Rejected:** migrating only inside the app container. Compose replaces the running container before the new one migrates, so a failed migration would leave the site down until a rollback.
+- **Rejected:** a separate backup image or a host cron job. One image keeps the PostgreSQL client and the app's code at the same version, and the stack carries its own schedule.
+- **Rejected:** copying every recording into every run. Media is the bulk of the data and does not change.
+- **Rejected:** an off-site backup target in the stack. It needs an account or a paid service; the owner copies the backup folder with the host's own tooling.
+
 ### 2026-10-31 — S6: a tool-less Claude behind an outbound connector, one runtime session and workspace per conversation
 - **Context:** S6 needs a real Skynet conversation about the passage (DOD-21, DOD-22) without exposing the runtime, its credentials or the owner's PC, and without the model running tools. AgentConsole's `claude` provider does not enforce permission gates on its own, and the `codex` provider currently fails `adapter_schema_mismatch` against this runtime build.
 - **Chosen:** the connector (`npm run connector`) runs on the PC, starts AgentConsole over stdio and dials `wss://…/connector` with `CONNECTOR_TOKEN`. The server sends `dispatch`, `interrupt` and `resume`; the connector forwards runtime events with their runtime seq. Only the owner named by `ASSISTANT_OWNER_EMAIL` can see the panel or create turns. Runtime ids, the principal and paths never leave the server (I-25).

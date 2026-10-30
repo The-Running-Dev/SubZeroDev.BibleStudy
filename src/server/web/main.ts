@@ -14,7 +14,14 @@ import { buildApp } from './app.ts';
 
 const config = loadConfig();
 const db = createPool(config.databaseUrl);
-await migrate(db);
+// A failed migration stops the process before the listener opens: nothing serves a half-migrated schema.
+try {
+  await migrate(db);
+} catch (error) {
+  log('error', 'migration failed', { error: (error as Error).message });
+  await db.end().catch(() => undefined);
+  process.exit(1);
+}
 // DOD-11: playback that was running when the process stopped resumes as paused, at its derived position.
 await recoverSessions({ db, clock: systemClock, mediaDir: config.mediaDir });
 

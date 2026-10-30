@@ -135,7 +135,7 @@ Acceptance:
 Out of scope: notes in the context (S12 adds `noteIds`); LLM in group sessions (non-goal).
 
 ## S7 — Deploy to the VPS
-Status: todo
+Status: done
 Delivers: The owner can run the app on their VPS from a merged commit, with nightly backups and a restore they have seen work, so the group can use it with the PC off.
 Touches: container image, compose stack, GitHub Actions publish workflow, backup job, deploy docs
 Depends on: S1

@@ -338,12 +338,14 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 **Server:**
 - GitHub Actions builds one container image per merge to `main` and pushes it to GHCR (`ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`).
 - When the repository variable `DEPLOY_ENABLED` is true, it then calls the Portainer redeploy webhook stored in the `PORTAINER_REDEPLOY_WEBHOOK_URL` secret. This is the same pipeline Adventures uses.
-- The Portainer Git stack, defined by the repository's compose file, runs:
+- The Portainer Git stack, defined by the repository's `compose.yaml`, runs:
   - the app container;
   - PostgreSQL with a named volume;
-  - a named media volume.
+  - a named media volume;
+  - a one-shot `migrate` service that the app waits on;
+  - a `backup` service: a nightly `pg_dump` plus a media manifest, with a shared deduplicated store for recordings and a restore that checks every checksum first (`docs/deploy.md`).
 - The stack joins the existing `proxy-net`, and the existing reverse proxy terminates TLS for the app hostname (proposed: `biblestudy.subzerodev.com`).
-- Migrations run on container start, before the listener opens. A failed migration exits the container, and Portainer keeps the previous one running.
+- Migrations run in the `migrate` service before the app is replaced. A failed migration stops `docker compose up` there, so the previous app keeps running. The app also migrates on start, before the listener opens, and exits non-zero if that fails.
 - `/__build-id` reports the commit for deploy verification.
 
 **Content:**
