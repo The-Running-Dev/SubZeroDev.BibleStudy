@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# No `paths` filter: this job reports on every pull request so merges always have a check.
+# Language-specific gates are added here once the implementation language is chosen.
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      # verification: true
+      - name: Check repository text and Markdown links
+        run: node scripts/check-docs.ts
