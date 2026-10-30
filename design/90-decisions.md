@@ -1,0 +1,178 @@
+# Decision log
+
+Append-only. Newest at the top. The rejected alternatives are the point — without them, every future session relitigates the same choice.
+
+## Open
+- Which real phones run the device checks (DOD-23, DOD-28, DOD-29).
+- Whether `biblestudy.subzerodev.com` is the hostname, and who adds its DNS record and proxy route.
+
+---
+
+## D-2026-10-30-17 — CI runs a repository text check before any language exists
+- **Context:** the kit's merge tool refuses pull requests that have no checks (`NoChecksConfigured`). Before this, the repository had only Markdown.
+- **Chosen:** a CI job that runs on every pull request, with no paths filter, and checks that tracked text is UTF-8 with LF endings and a final newline, and that relative Markdown links resolve. Language gates are added to the same job when code arrives.
+- **Rejected:** a placeholder job that always passes. It proves nothing.
+- **Rejected:** waiting for code before merging the brief. The brief would have blocked on implementation.
+
+## D-2026-10-30-16 — Delivery re-estimate
+- **Context:** the brief marks the original 2 November 2026 demo target as superseded by the expanded scope.
+- **Chosen:**
+  - The **narrow path** is built first. It covers sign-in by emailed code, one group, shared BSB narration with verse following, questions during the week, and the confirmed stopping point.
+  - The solo and assistant path follows, then offline downloads and sync, then phone hardening.
+  - Expected time to the full v1 definition of done is about three to four weeks of build sessions. The owner-side steps run in parallel and their wait is not counted:
+    - the DNS record and proxy route;
+    - the Gmail app password;
+    - API.Bible access for CSB;
+    - device testing.
+  - The 2 November 2026 date is not achievable for the full scope. The narrow path is the first demoable milestone.
+- **Rejected:** keeping 2 November by cutting the definition of done silently.
+
+## D-2026-10-30-15 — Gaps the brief left, resolved as design assumptions
+- **Context:** `/brief` found underspecified points and unstated environment facts. The owner asked for routine choices to be resolved without repeated questions.
+- **Chosen:**
+  - **Implied non-goals for v1:** push notifications, more than one group in the UI, self-service account deletion (the owner removes members; personal export exists), localization (English only), moderation tools and analytics.
+  - **Backups:**
+    - a nightly `pg_dump` and a media-volume manifest written to a backup volume on the VPS, keeping 14 days;
+    - a restore drill is a planned slice, with its result reported.
+  - **Uptime:** best effort on the VPS, with no paging. The owner's status page shows failed email jobs and the connector state.
+  - **Cost ceiling:** $0 recurring. Every external service used is on a free tier the owner already has or creates themselves.
+  - **Resume (DOD-21):** reopening the assistant, or reconnecting it, continues the stored transcript from its last runtime sequence number.
+- **Rejected:** asking the owner each point separately. They are routine and reversible.
+
+## D-2026-10-30-14 — Reminder timing rules
+- **Context:** DOD-04 needs correct local times across clock changes, and no duplicates.
+- **Chosen:**
+  - Reminders are computed from each Occurrence's derived instant. One delivery row exists per occurrence revision, member and offset.
+  - Moved or cancelled occurrences suppress older rows.
+  - A reminder whose send time passed more than 30 minutes ago is suppressed, not sent late.
+  - Reminders link to the study page, which has no voice to join.
+- **Rejected:** cron-style schedules per user. They duplicate the zone math and drift across clock changes.
+- **Rejected:** sending missed reminders late. After downtime, a "starts in 1 hour" email that arrives after the start is misleading.
+
+## D-2026-10-30-13 — One container serves the app, API and WebSocket
+- **Context:** Adventures serves its frontend from a separate nginx container.
+- **Chosen:** the Node service serves the built app on the same origin as the API, WebSocket and media.
+- **Rejected:** a separate static container. It gives no benefit at this scale, and it adds cross-origin cookie and WebSocket configuration.
+
+## D-2026-10-30-12 — The Skynet connector runs on the owner's PC and dials out
+- **Context:**
+  - AgentConsole runs on the owner's PC, uses the PC's model CLIs, and speaks JSON-RPC over stdio.
+  - DOD-21 and DOD-22 need a real conversation without tools and without exposing the runtime.
+- **Chosen:**
+  - A connector process on the PC starts AgentConsole and opens an authenticated outbound WebSocket to the server, using `CONNECTOR_TOKEN`.
+  - The server relays turns only for `ASSISTANT_OWNER_EMAIL`.
+  - Sessions use an opaque principal, a dedicated empty working directory, and the most restrictive sandbox the provider offers.
+  - Every permission request is denied, and a tool attempt fails the turn.
+  - Turns are keyed by a client turn id and never resent. Transcript entries are unique by runtime sequence number.
+- **Rejected:** running AgentConsole on the VPS. The CLIs and subscriptions are on the PC.
+- **Rejected:** a tunnel into the PC. It opens an inbound path to a development machine.
+- **Rejected:** a separate model API key. The brief assumes none.
+
+## D-2026-10-30-11 — Implementation stack
+- **Context:** the brief lists the handoff's stack as a proposal.
+- **Chosen:**
+  - TypeScript throughout.
+  - Node 24 for the server, with HTTP and one WebSocket endpoint.
+  - PostgreSQL 17.
+  - React with Vite for the installable web app.
+  - A hand-written service worker and IndexedDB layer following the Adventures patterns.
+  - An open-source SMTP library for mail.
+- **Rejected:** a framework with server rendering. The app is a single-origin installable client; server rendering adds nothing offline.
+- **Rejected:** SQLite. The concurrent writers are the realtime channel, the reminder tick and the mail worker. Advisory locks and `SKIP LOCKED` cover them directly.
+
+## D-2026-10-30-10 — Scope of sync conflicts
+- **Context:** DOD-26 asks that conflicting versions are kept for the user to choose. The brief leaves the scope open.
+- **Chosen:**
+  - Conflicts are kept for note bodies only.
+  - Solo position takes the last write the server receives: it is a pointer, not something a user would merge.
+  - Question drafts never sync: they are device-local until published.
+  - Group commands and stopping points are never queued offline.
+- **Rejected:** conflict choice for every personal field. That produces prompts about bookmarks no one would understand.
+
+## D-2026-10-30-09 — Invitations are single-use links
+- **Context:** the brief does not say whether an invitation link is reusable.
+- **Chosen:** each link creates one membership and expires after 14 days. The owner can list and revoke links. The app never emails invitations; the owner sends the link themselves.
+- **Rejected:** a reusable group link. A forwarded link would admit anyone.
+- **Rejected:** emailing invitations from the app. The brief forbids sending real invitations to prepare the demo, and owner-sent links avoid it entirely.
+
+## D-2026-10-30-08 — Sign-in by emailed code with server sessions
+- **Context:** DOD-01.
+- **Chosen:**
+  - A 6-digit code, valid for 10 minutes, dead after 5 wrong tries, stored only as a hash.
+  - A sliding 90-day session in an HttpOnly cookie.
+  - The invitation token is carried through sign-in.
+- **Rejected:** magic links. On iPhone they open in Safari, not the installed app.
+- **Rejected:** JWTs. They cannot be revoked without a lookup.
+
+## D-2026-10-30-07 — Email through a configurable SMTP relay, free by default
+- **Context:**
+  - The owner refused paid email: "there are plenty of free tools for sending email, find one, open source or something".
+  - Login codes need reliable delivery to ordinary inboxes.
+- **Chosen:**
+  - The app sends through an open-source SMTP library to whatever `SMTP_URL` names.
+  - **Default:** the owner's existing Gmail account with an app password. It is free, needs no new account, allows about 500 messages a day, and has Gmail's deliverability.
+  - **Supported alternative:** a self-hosted open-source Postfix container in the stack, signing DKIM. It needs outbound port 25 from the VPS plus SPF, DKIM, DMARC and reverse-DNS records.
+  - Development uses Mailpit (open source) to capture mail.
+- **Rejected:** commercial sending APIs. They need a new account and their free tiers change.
+- **Rejected as the default:** self-hosted direct delivery. A new VPS address is often filtered as spam and port 25 is often blocked. It remains a configuration choice.
+
+## D-2026-10-30-06 — Narrators are enabled only with a recorded license
+- **Context:**
+  - The brief says the publisher identifies the Souer, Hays and Gilbert recordings as CC0.
+  - The AO Lab API names its narrators `souer`, `hays` and `david`.
+- **Chosen:**
+  - `souer` and `hays` are enabled with the license source recorded at import.
+  - `david` stays disabled until the import confirms it is the Gilbert recording and records the license source.
+- **Rejected:** enabling all three on assumption. DOD-14 requires recorded recording rights.
+
+## D-2026-10-30-05 — Content is imported into our storage, one instance, data keyed by group
+- **Context:** premise 4, agreed by the owner.
+- **Chosen:**
+  - **Text:** BSB text from the AO Lab Free Use Bible API is imported in full with checksums and the source version.
+  - **Audio:** imported per chapter (Romans at setup, other chapters on first request), with verse timing validated before use.
+  - **Clients:** read only from our origin.
+  - **Deployment:** one deployment serves one group, and every group-scoped row carries a group id.
+- **Rejected:** clients calling AO Lab directly. The audio host sends no CORS headers, and upstream changes would alter displayed text.
+- **Rejected:** multi-tenant deployment now. It is not needed for one group, and the group id keeps the door open.
+
+## D-2026-10-30-04 — CSB text from API.Bible's free Starter plan
+- **Context:**
+  - CSB must be selectable (DOD-12).
+  - The owner refused to pay for a text licence.
+  - API.Bible's Starter plan is $0 for noncommercial use, with up to 3 licensed Bibles and 5,000 calls a month. CSB is in its catalogue.
+- **Chosen:**
+  - The owner creates the API.Bible account and requests CSB.
+  - The server fetches CSB chapters with the key and caches each chapter for at most 14 days.
+  - Clients report Fair Use as required, and show the copyright notice.
+  - CSB narration is reported unavailable.
+  - Until a key is configured, CSB is selectable and says it is not available from a licensed source.
+- **Rejected:** copying text from read.csbible.com. It is not licensed.
+- **Rejected:** dropping CSB. It is required.
+- **Rejected:** a paid licence. The owner declined.
+
+## D-2026-10-30-03 — Shared narration is one server-hosted file played on every device
+- **Context:** premise 2, agreed by the owner.
+- **Chosen:**
+  - Each device plays the same recording, aligned to server time through one revisioned playback state per session.
+  - Pause is always applied; other commands need the current revision.
+  - Drift is corrected toward a 500 ms target and reported.
+- **Rejected:** streaming one device's audio to the others. It needs a media server and creates a host.
+- **Rejected:** synthesizing speech locally. That is a non-goal.
+
+## D-2026-10-30-02 — Built-in group voice is dropped from v1
+- **Context:** at the approach step the owner said: "Drop the audio for now, i have a different solution that does not need to be put in the first version, otherwise use my VPS."
+- **Chosen:**
+  - v1 has no built-in voice.
+  - DOD-08, the voice-room parts of DOD-07 and DOD-11, and microphone checks in DOD-29 move out of v1.
+  - Narration autoplay, lock and foreground recovery, and headphones checks in DOD-29 stay.
+  - The group keeps talking on its existing call while the app synchronizes the passage and narration.
+- **Rejected:** LiveKit Cloud's free tier, and self-hosted voice with TURN. The owner has a different solution for later.
+
+## D-2026-10-30-01 — Hosted on the owner's VPS as a container stack
+- **Context:** premise 1, agreed by the owner. The app must work with the owner's PC off.
+- **Chosen:**
+  - A Portainer Git stack on the existing VPS: the app container, PostgreSQL and the media volume.
+  - Images go to GHCR from GitHub Actions, with a redeploy webhook — the Adventures pipeline.
+  - The existing reverse proxy terminates TLS on a `subzerodev.com` hostname.
+- **Rejected:** a managed platform. It means a new account, and possibly cost.
+- **Rejected:** hosting on the PC. The app would stop when the PC is off.
