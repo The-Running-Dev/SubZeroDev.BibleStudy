@@ -1,6 +1,8 @@
 import { createOutbox } from '../mail/outbox.ts';
 import { createSmtpTransport } from '../mail/transport.ts';
 import { createMailWorker } from '../mail/worker.ts';
+import { createAoLabSource } from '../content/aolab.ts';
+import { createAudioWorker } from '../content/audio-worker.ts';
 import { systemClock } from '../platform/clock.ts';
 import { loadConfig } from '../platform/config.ts';
 import { createPool } from '../platform/db.ts';
@@ -16,6 +18,7 @@ await migrate(db);
 const sealKey = deriveKey(config.appSecret, 'email-job-secrets');
 const transport = createSmtpTransport(config.smtpUrl, config.mailFrom);
 const worker = createMailWorker({ db, clock: systemClock, transport, sealKey });
+const audioWorker = createAudioWorker({ db, clock: systemClock, source: createAoLabSource({ baseUrl: config.aolabBaseUrl }), mediaDir: config.mediaDir });
 const app = await buildApp({
   config,
   db,
@@ -23,10 +26,11 @@ const app = await buildApp({
   outbox: createOutbox({ clock: systemClock, sealKey }),
   codePepper: deriveKey(config.appSecret, 'login-code-pepper'),
   onEmailQueued: () => worker.notify(),
+  onAudioQueued: () => audioWorker.notify(),
 });
 
 const stop = new AbortController();
-const workerDone = worker.run(stop.signal);
+const workerDone = Promise.all([worker.run(stop.signal), audioWorker.run(stop.signal)]);
 await app.listen({ host: config.host, port: config.port });
 log('info', 'listening', { port: config.port, buildId: config.buildId });
 

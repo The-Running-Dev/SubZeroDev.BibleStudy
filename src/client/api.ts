@@ -1,6 +1,7 @@
 import type {
   ApiError,
   ChapterView,
+  RecordingsResponse,
   CodeDelivery,
   Profile,
   ProfilePatch,
@@ -45,6 +46,9 @@ export const api = {
   updateMe: (patch: ProfilePatch) => call<Profile>('PATCH', '/api/me', patch),
   translations: () => call<TranslationView[]>('GET', '/api/content/translations'),
   chapter: (translationId: TranslationId, bookId: string, chapter: number) => call<ChapterView>('GET', `/api/content/${translationId}/${bookId}/${chapter}`),
+  // 202 while a recording is being prepared; the body lists what is ready so far.
+  recordings: (translationId: TranslationId, bookId: string, chapter: number) =>
+    call<RecordingsResponse>('GET', `/api/content/${translationId}/${bookId}/${chapter}/recordings`),
 };
 
 export function messageFor(error: unknown): string {

@@ -2,10 +2,10 @@ import type { Availability, BookView, TranslationId, TranslationView } from '../
 import { bookById } from '../../shared/books.ts';
 import type { Queryable } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
+import { narrationAvailability } from './narration.ts';
 
 // Until S13 wires API.Bible, CSB has no licensed source and is never served (I-11).
 export const csbNotConfigured: Availability = { state: 'not_configured', reason: 'CSB text not available from a licensed source' };
-const narrationAbsent: Availability = { state: 'unavailable', reason: 'No narration has been imported yet.' };
 const bsbNotImported: Availability = { state: 'unavailable', reason: 'BSB text has not been imported yet. Run import-content --translation BSB.' };
 
 export function parseTranslationId(input: unknown): TranslationId {
@@ -34,7 +34,7 @@ export async function listTranslations(db: Queryable): Promise<TranslationView[]
       name: row.name,
       copyrightNotice: row.copyright_notice,
       availability: await textAvailability(db, row.id),
-      narration: narrationAbsent,
+      narration: await narrationAvailability(db, row.id),
     })),
   );
 }

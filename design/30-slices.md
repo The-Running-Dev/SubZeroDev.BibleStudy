@@ -63,7 +63,7 @@ Acceptance:
 Out of scope: audio (S3); CSB fetching (S13); personal display translation (S12).
 
 ## S3 — Listen to a chapter with the verse highlighted
-Status: todo
+Status: done
 Delivers: A member can play the narrated chapter, see each verse highlighted as it is read, and play just a selected range that stops at its end. They are told plainly when a recording or verse following is missing.
 Touches: content (narrators, recordings, audio import, media serving, `listRecordings`, `resolveRecording`), client player (solo playback only)
 Depends on: S2

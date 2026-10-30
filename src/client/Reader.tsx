@@ -4,6 +4,7 @@ import type { ChapterView, PassageRef, TranslationId, TranslationView } from '..
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
+import { Player } from './Player.tsx';
 
 type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView } | { kind: 'unavailable'; message: string };
 
@@ -16,6 +17,7 @@ export function Reader() {
   const [text, setText] = useState<Text>({ kind: 'loading' });
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<number | null>(null);
 
   useEffect(() => {
     api
@@ -49,7 +51,8 @@ export function Reader() {
   }, [shown, at]);
 
   const book = bookById(at.bookId)!;
-  const notice = translations.find((t) => t.id === translationId)?.copyrightNotice;
+  const translation = translations.find((t) => t.id === translationId);
+  const notice = translation?.copyrightNotice;
   const previous = adjacentChapter(at, -1);
   const next = adjacentChapter(at, 1);
   const go = (bookId: string, chapter: number) => setAt({ bookId, chapter, startVerse: null, endVerse: null });
@@ -103,9 +106,11 @@ export function Reader() {
         {entryError && <p role="alert">{entryError}</p>}
       </header>
 
+      {shown && <Player translation={translation} at={at} verseCount={shown.verseCount} onVerse={setPlaying} />}
+
       <article className="passage" aria-busy={text.kind === 'loading'}>
         {text.kind === 'unavailable' && <p role="status">{text.message}</p>}
-        {text.kind === 'ready' && <Passage chapter={text.chapter} marked={marked} />}
+        {text.kind === 'ready' && <Passage chapter={text.chapter} marked={marked} playing={shown ? playing : null} />}
         {text.kind === 'ready' && notice && <p className="copyright">{notice}</p>}
       </article>
 
@@ -121,7 +126,7 @@ export function Reader() {
   );
 }
 
-function Passage(props: { chapter: ChapterView; marked: (verse: number) => boolean }) {
+function Passage(props: { chapter: ChapterView; marked: (verse: number) => boolean; playing: number | null }) {
   const { chapter } = props;
   return (
     <>
@@ -134,7 +139,12 @@ function Passage(props: { chapter: ChapterView; marked: (verse: number) => boole
                 {h.text}
               </h2>
             ))}
-          <p id={`v-${verse.number}`} className={props.marked(verse.number) ? 'verse marked' : 'verse'} aria-current={props.marked(verse.number) ? 'true' : undefined}>
+          <p
+            id={`v-${verse.number}`}
+            className={['verse', props.marked(verse.number) && 'marked', props.playing === verse.number && 'playing'].filter(Boolean).join(' ')}
+            aria-current={props.marked(verse.number) ? 'true' : undefined}
+            data-playing={props.playing === verse.number ? 'true' : undefined}
+          >
             <sup className="verse-number">{verse.number}</sup>
             {verse.text}
           </p>
