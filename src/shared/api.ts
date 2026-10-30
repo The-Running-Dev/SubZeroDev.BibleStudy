@@ -92,3 +92,24 @@ export interface ChapterView extends ChapterContent {
   expiresAt: IsoInstant | null;
   fums?: { token: string };
 }
+
+export type RecordingTiming = { status: 'verified'; verseStarts: number[] } | { status: 'absent' | 'rejected'; reason: string };
+
+export interface RecordingView {
+  id: Uuid;
+  narratorId: string;
+  narratorName: string;
+  license: string;
+  mediaUrl: string;
+  mediaSha256: string;
+  bytes: number;
+  durationSeconds: number;
+  timing: RecordingTiming;
+}
+
+// `preparing` lists narrators whose recording is being fetched on first request; poll again after 5 s.
+export interface RecordingsResponse {
+  recordings: RecordingView[];
+  preparing: string[];
+  failed: { narratorId: string; reason: string }[];
+}

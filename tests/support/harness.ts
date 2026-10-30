@@ -1,5 +1,12 @@
 // Integration harness: a real PostgreSQL and a real SMTP sink (Mailpit), with a movable clock.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import { createAoLabSource } from '../../src/server/content/aolab.ts';
+import type { ContentSource } from '../../src/server/content/aolab.ts';
+import { createAudioWorker } from '../../src/server/content/audio-worker.ts';
+import type { AudioWorker } from '../../src/server/content/audio-worker.ts';
 import { createOutbox } from '../../src/server/mail/outbox.ts';
 import { createSmtpTransport } from '../../src/server/mail/transport.ts';
 import type { MailTransport } from '../../src/server/mail/transport.ts';
@@ -24,6 +31,7 @@ export interface Harness {
   clock: FakeClock;
   config: Config;
   worker: MailWorker;
+  audioWorker: AudioWorker;
   transport: MailTransport;
   close(): Promise<void>;
 }
@@ -34,17 +42,20 @@ export async function resetDatabase(db: Db): Promise<void> {
   await migrate(db);
 }
 
-// Keeps migration-seeded reference rows (translations).
+// Keeps migration-seeded reference rows (translations, narrators).
 export async function truncateAll(db: Db): Promise<void> {
   const tables = await db.query<{ tablename: string }>(
-    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('schema_migrations', 'translations')`,
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('schema_migrations', 'translations', 'narrators')`,
   );
   if (tables.rowCount) await db.query(`TRUNCATE ${tables.rows.map((t) => `"${t.tablename}"`).join(', ')} CASCADE`);
 }
 
 // `env` overrides the test configuration, e.g. STATIC_DIR to serve the built client.
-export async function startHarness(env: Record<string, string> = {}): Promise<Harness> {
+// Recordings go to a fresh temporary MEDIA_DIR unless one is given; `source` replaces the live AO Lab for the audio worker.
+export async function startHarness(env: Record<string, string> = {}, options: { source?: ContentSource } = {}): Promise<Harness> {
+  const tempMedia = env.MEDIA_DIR ? null : mkdtempSync(join(tmpdir(), 'biblestudy-media-'));
   const config = loadConfig({
+    MEDIA_DIR: tempMedia ?? '',
     DATABASE_URL: databaseUrl,
     APP_SECRET: 'integration-test-secret-0123456789abcdef',
     SMTP_URL: smtpUrl,
@@ -60,6 +71,8 @@ export async function startHarness(env: Record<string, string> = {}): Promise<Ha
   const sealKey = deriveKey(config.appSecret, 'email-job-secrets');
   const transport = createSmtpTransport(config.smtpUrl, config.mailFrom);
   const worker = createMailWorker({ db, clock, transport, sealKey });
+  const source = options.source ?? createAoLabSource({ baseUrl: config.aolabBaseUrl });
+  const audioWorker = createAudioWorker({ db, clock, source, mediaDir: config.mediaDir });
   const app = await buildApp({
     config,
     db,
@@ -74,11 +87,13 @@ export async function startHarness(env: Record<string, string> = {}): Promise<Ha
     clock,
     config,
     worker,
+    audioWorker,
     transport,
     async close() {
       await app.close();
       transport.close();
       await db.end();
+      if (tempMedia) rmSync(tempMedia, { recursive: true, force: true });
     },
   };
 }

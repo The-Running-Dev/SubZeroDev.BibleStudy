@@ -14,6 +14,9 @@ export interface Config {
   trustProxy: false | number | string;
   buildId: string;
   staticDir: string;
+  // Recordings, one file per SHA-256; a volume in production.
+  mediaDir: string;
+  aolabBaseUrl: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -27,6 +30,14 @@ function parseTrustProxy(raw: string | undefined, problems: string[]): false | n
     return false;
   }
   return value;
+}
+
+// The settings import-content shares with the server, readable without the server's required ones.
+export function contentSettings(env: Env = process.env): Pick<Config, 'mediaDir' | 'aolabBaseUrl'> {
+  return {
+    mediaDir: env.MEDIA_DIR?.trim() || 'data/media',
+    aolabBaseUrl: (env.AOLAB_BASE_URL?.trim() || 'https://bible.helloao.org').replace(/\/+$/, ''),
+  };
 }
 
 export function loadConfig(env: Env = process.env): Config {
@@ -49,6 +60,7 @@ export function loadConfig(env: Env = process.env): Config {
     trustProxy: parseTrustProxy(env.TRUST_PROXY, problems),
     buildId: env.BUILD_ID?.trim() || 'dev',
     staticDir: env.STATIC_DIR?.trim() || 'dist/client',
+    ...contentSettings(env),
   };
 
   if (config.appSecret && config.appSecret.length < 32) problems.push('APP_SECRET must be at least 32 characters');

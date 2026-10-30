@@ -45,3 +45,6 @@ node_modules/
 .npm/
 .next/
 out/
+
+# Recordings stored by a local run (MEDIA_DIR)
+data/

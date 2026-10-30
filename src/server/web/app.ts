@@ -16,7 +16,7 @@ import { registerIdentityRoutes } from './identity-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
 
-// API paths reachable without a session.
+// API paths reachable without a session. Recordings under /media/ need one too.
 const publicApiPaths = new Set(['/api/auth/code', '/api/auth/verify', '/api/auth/code-status']);
 
 declare module 'fastify' {
@@ -42,6 +42,8 @@ export interface AppDeps {
   codePepper: Buffer;
   // Wakes the mail worker after a job is enqueued, so a code goes out without waiting for the next poll.
   onEmailQueued?: () => void;
+  // Wakes the audio worker after a recording is queued for on-demand import.
+  onAudioQueued?: () => void;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -60,7 +62,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // "/%61pi/me" reaches the /api/me handler while its raw URL does not start with /api/.
     // Unmatched paths are judged by their decoded form, so an unknown /api/ path is refused before it 404s.
     const route = request.routeOptions.url ?? decodedPath(request.url);
-    if (!route.startsWith('/api/') || publicApiPaths.has(route)) return;
+    if (!(route.startsWith('/api/') || route.startsWith('/media/')) || publicApiPaths.has(route)) return;
     const auth = await authenticate(deps.db, deps.clock, request.cookies[sessionCookie]);
     if (!auth) throw new AppError('unauthenticated', 401, 'Sign in to continue.');
     request.auth = auth;
@@ -109,7 +111,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   }
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith('/api/') || request.method !== 'GET' || !hasClient) {
+    if (request.url.startsWith('/api/') || request.url.startsWith('/media/') || request.method !== 'GET' || !hasClient) {
       return reply.status(404).send({ error: 'not_found', message: 'Not found.', retryable: false });
     }
     // Client-side routes all load the app shell.

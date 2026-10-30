@@ -8,6 +8,18 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-30 — S3: narration is fetched on first use and stored by content hash
+- **Context:** AO Lab publishes CC0 recordings for every BSB chapter by three narrators, with per-verse start times. Importing all of them up front is about 3,500 files, most of which nobody will open.
+- **Chosen:** `import-content --audio ROM:1-16` imports a scope ahead of time. Any other chapter is fetched the first time a member opens its player. The recordings endpoint answers 202 with the same body as 200: what is stored, what is `preparing` and what `failed`. An `audio_jobs` row tracks each fetch. A background worker retries a 5xx or network failure after 1, 5, 15 and 60 minutes, the same schedule as email. A 404 fails at once. A failed job is reported for an hour, and the next request after that queues it again. Each job writes its own manifest, so on-demand fetches are audited like imports.
+- **Chosen:** files are stored as `<sha256>.mp3` in `MEDIA_DIR` and served from `/media/<sha256>` with range requests, `ETag` = the hash, and `Cache-Control: private, max-age=31536000, immutable`. The route needs a session, like the text.
+- **Chosen:** timing is validated on import: one start per verse, strictly increasing, inside the recording's duration (read from the MP3 frames). A timing file that is missing is `absent`; one that fails validation is `rejected` with its reason. Both play the whole chapter without the highlight and without range play.
+- **Chosen:** `david` is seeded disabled and is refused before any download. Only enabled narrators are listed or queued.
+- **Chosen:** CSB has no narration. Its availability reason is 'No CSB narration is licensed.', and no BSB recording is offered while CSB is displayed.
+- **Chosen:** a range play pauses where the next verse starts and keeps the last verse of the range highlighted. Seeking out of the range ends it.
+- **Rejected:** importing every recording at deploy time. Several gigabytes on the VPS for chapters that may never be played.
+- **Rejected:** proxying AO Lab's audio per request. Every play would depend on their CDN, and offline download (S14) needs files we hold.
+- **Rejected:** a public, unauthenticated `/media/` route. The recordings are CC0, but the service is for members, and one rule for every route is simpler to check.
+
 ### 2026-10-30 — S2: chapter text is stored as the exact JSON it is served as
 - **Context:** I-10 says `contentSha256` hashes the stored content. Postgres `jsonb` reorders keys and normalises whitespace, so a hash of the input would not match what a later read returns.
 - **Chosen:** `chapters.content` is `text` holding canonical JSON (`verses`, `headings`, `footnotes`, keys in a fixed order). The chapter endpoint splices those bytes into the response unchanged, and its ETag is the hash, so an unchanged chapter costs a 304. The import writes a row only when the hash differs (`ON CONFLICT … WHERE content_sha256 <> excluded.content_sha256`), which is how a re-run changes no rows.
