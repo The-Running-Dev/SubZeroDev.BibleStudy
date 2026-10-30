@@ -5,12 +5,33 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 # No `paths` filter: this job reports on every pull request so merges always have a check.
-# Language-specific gates are added here once the implementation language is chosen.
 jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: biblestudy
+          POSTGRES_PASSWORD: biblestudy
+          POSTGRES_DB: biblestudy
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U biblestudy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports:
+          - 1025:1025
+          - 8025:8025
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -19,6 +40,48 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: npm
+
+      # verification: true
+      - name: Install
+        run: npm ci
+
+      # verification: true
+      - name: Typecheck
+        run: npm run typecheck
+
+      # verification: true
+      - name: Lint
+        run: npm run lint
+
+      # verification: true
+      - name: Unit tests
+        run: npm test
+
+      # verification: true
+      - name: Build client
+        run: npm run build
+
+      # verification: true
+      - name: Integration tests (Postgres + Mailpit)
+        run: npm run test:integration
+
+      # verification: true
+      - name: Container builds and serves its build id
+        run: |
+          docker build --build-arg BUILD_ID=ci-${{ github.sha }} -t biblestudy:ci .
+          docker run -d --name biblestudy --network host \
+            -e DATABASE_URL=postgres://biblestudy:biblestudy@localhost:55432/biblestudy \
+            -e APP_SECRET=ci-only-placeholder-secret-0123456789abcdef \
+            -e SMTP_URL=smtp://localhost:1025 \
+            biblestudy:ci
+          for i in $(seq 1 30); do
+            body=$(curl -fsS http://localhost:3000/__build-id) && break
+            sleep 1
+          done
+          docker logs biblestudy
+          echo "$body"
+          test "$body" = "{\"buildId\":\"ci-${{ github.sha }}\"}"
 
       # verification: true
       - name: Check repository text and Markdown links

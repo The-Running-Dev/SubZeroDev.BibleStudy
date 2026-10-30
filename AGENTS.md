@@ -6,7 +6,11 @@
 <!-- BEGIN project-commands -->
 ## Essential Commands
 
-The implementation language has not been selected yet, so this project has no install, build, test, lint or run commands. Do not guess or invent them; they are added here when the language is chosen.
+- **Install:** `npm install`
+- **Build:** `npm run build`
+- **Test:** `npm test`
+- **Lint/Format:** `npm run lint`
+- **Run locally:** `npm start`
 <!-- END project-commands -->
 
 ## Architecture & Design

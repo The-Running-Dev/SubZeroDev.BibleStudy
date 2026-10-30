@@ -1,10 +1,11 @@
 # SubZeroDev.BibleStudy
 
-Brief description of what this project does and its main purpose.
+A private Bible-study app for a small group: shared narrated reading, questions during the week, and solo study. Phones install it as a PWA.
 
 ## Prerequisites
 
-- [List required tools, frameworks, and versions]
+- Node.js 24 or later (runs the TypeScript server directly)
+- Docker, for the local Postgres and Mailpit services and the production image
 
 ## Local Setup
 
@@ -17,13 +18,65 @@ Brief description of what this project does and its main purpose.
 2. **Configure environment**
    ```bash
    cp .env.example .env
-   # Edit .env and add your configuration
+   # Set APP_SECRET; the defaults point at the local services below
    ```
 
-<!-- BEGIN project-commands -->
-## Implementation Stack
+3. **Start Postgres and Mailpit**
+   ```bash
+   npm run dev:services
+   ```
+   Mailpit shows every email the app sends at http://localhost:8025.
 
-Not selected yet. Install, build, test, lint and run commands are added here when the implementation language is chosen.
+4. **Run the server and client**
+   ```bash
+   node --env-file=.env src/server/web/main.ts
+   npm run dev:client
+   ```
+   The server applies migrations on start. Open http://localhost:5173 and sign in with any address; the code arrives in Mailpit.
+
+## Integration tests
+
+`npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services`. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`.
+
+## Container
+
+```bash
+docker build --build-arg BUILD_ID=$(git rev-parse --short HEAD) -t biblestudy .
+docker run -p 3000:3000 -e DATABASE_URL=... -e APP_SECRET=... -e SMTP_URL=... biblestudy
+```
+
+`GET /__build-id` returns the running build. See `.env.example` for every variable.
+
+<!-- BEGIN project-commands -->
+## Install
+
+```bash
+npm install
+```
+
+## Build
+
+```bash
+npm run build
+```
+
+## Test
+
+```bash
+npm test
+```
+
+## Lint
+
+```bash
+npm run lint
+```
+
+## Run Locally
+
+```bash
+npm start
+```
 <!-- END project-commands -->
 
 ## Architecture

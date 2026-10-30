@@ -21,7 +21,7 @@ The narrow path in the brief is S1–S5 and S8–S9. The solo path adds S6 and S
 Each such criterion says so. A slice whose code is complete but whose owner-side check cannot run yet is reported with that check marked not performed, never as passed.
 
 ## S1 — Sign in with an emailed code
-Status: todo
+Status: done
 Delivers: A group member can sign in with nothing but their email address and a code sent to it, then set their name and time zone. They stay signed in on that device and can sign in on another.
 Touches: platform, mail, identity, web, client shell; CI gates; container image
 Depends on: none
