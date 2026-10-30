@@ -77,6 +77,13 @@ export interface SourceOptions {
 
 export const defaultAudioHosts = ['audio.bible.helloao.org'];
 
+const maxRedirects = 3;
+
+// A 4xx other than a timeout or a rate limit will not change on retry. A null status is a network fault.
+export function isPermanent(status: number | null): boolean {
+  return status !== null && status < 500 && status !== 408 && status !== 429;
+}
+
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function createAoLabSource(options: SourceOptions): ContentSource {
@@ -86,7 +93,7 @@ export function createAoLabSource(options: SourceOptions): ContentSource {
   const audioHosts = new Set([new URL(baseUrl).host, ...(options.audioHosts ?? defaultAudioHosts)]);
   const maxAudioBytes = options.maxAudioBytes ?? 100 * 1024 * 1024;
 
-  // Retries network errors and 5xx; a 404 or a refused response fails at once.
+  // Retries network errors, 5xx, 408 and 429; any other 4xx or a refused response fails at once.
   async function withRetry<T>(label: string, work: () => Promise<T>): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -94,22 +101,46 @@ export function createAoLabSource(options: SourceOptions): ContentSource {
         return await work();
       } catch (error) {
         lastError = error;
-        if (error instanceof SourceError && error.status !== null && error.status < 500) throw error;
+        if (error instanceof SourceError && isPermanent(error.status)) throw error;
         if (attempt < attempts) await sleep(1000 * 2 ** (attempt - 1));
       }
     }
     throw lastError instanceof SourceError ? lastError : new SourceError(`${label}: ${String((lastError as Error)?.message ?? lastError)}`, null);
   }
 
-  async function get(url: string, label: string, timeoutMs: number): Promise<Response> {
-    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-    if (response.status === 404) throw new SourceError(`${label}: not found`, 404);
-    if (!response.ok) throw new SourceError(`${label}: HTTP ${response.status}`, response.status);
-    return response;
+  const base = new URL(baseUrl);
+  // JSON comes only from the base URL's origin; audio only from an allowed host, over https.
+  const checkJsonUrl = (url: URL) => {
+    if (url.origin !== base.origin) throw new SourceError(`${url.href}: not on ${base.origin}`, 400);
+  };
+  const checkAudioUrl = (url: URL) => {
+    if (url.protocol !== 'https:' && url.origin !== base.origin) throw new SourceError(`${url.href}: audio must be fetched over https`, 400);
+    if (!audioHosts.has(url.host)) throw new SourceError(`${url.href}: ${url.host} is not an audio source`, 400);
+  };
+
+  // Redirects are followed by hand so every hop passes the same host check as the first URL.
+  async function get(url: string, label: string, timeoutMs: number, check: (url: URL) => void): Promise<Response> {
+    const signal = AbortSignal.timeout(timeoutMs);
+    let current = new URL(url);
+    for (let hop = 0; ; hop++) {
+      check(current);
+      const response = await fetch(current, { signal, redirect: 'manual' });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        await response.body?.cancel();
+        if (!location) throw new SourceError(`${label}: HTTP ${response.status} without a location`, 502);
+        if (hop >= maxRedirects) throw new SourceError(`${label}: more than ${maxRedirects} redirects`, 400);
+        current = new URL(location, current);
+        continue;
+      }
+      if (response.status === 404) throw new SourceError(`${label}: not found`, 404);
+      if (!response.ok) throw new SourceError(`${label}: HTTP ${response.status}`, response.status);
+      return response;
+    }
   }
 
   const getJson = <T>(path: string): Promise<T> =>
-    withRetry(path, async () => (await (await get(`${baseUrl}${path}`, path, options.timeoutMs ?? 30_000)).json()) as T);
+    withRetry(path, async () => (await (await get(`${baseUrl}${path}`, path, options.timeoutMs ?? 30_000, checkJsonUrl)).json()) as T);
 
   return {
     books: (translationId) => getJson(`/api/${translationId}/books.json`),
@@ -119,11 +150,9 @@ export function createAoLabSource(options: SourceOptions): ContentSource {
       return getJson(path);
     },
     audio: (url) => {
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'https:' && parsed.host !== new URL(baseUrl).host) throw new SourceError(`${url}: audio must be fetched over https`, 400);
-      if (!audioHosts.has(parsed.host)) throw new SourceError(`${url}: ${parsed.host} is not an audio source`, 400);
+      checkAudioUrl(new URL(url));
       return withRetry(url, async () => {
-        const response = await get(url, url, options.timeoutMs ?? 120_000);
+        const response = await get(url, url, options.timeoutMs ?? 120_000, checkAudioUrl);
         const mimeType = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
         if (mimeType !== 'audio/mpeg') throw new SourceError(`${url}: expected audio/mpeg, got ${mimeType || 'no content type'}`, 415);
         const declared = Number(response.headers.get('content-length') ?? NaN);

@@ -19,9 +19,10 @@ export function parseRange(header: string | undefined, size: number): { start: n
     return { start: Math.max(0, size - suffix), end: size - 1 };
   }
   const start = Number(match[1]);
-  const end = match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1);
-  if (start >= size || start > end) return 'unsatisfiable';
-  return { start, end };
+  // A last position before the first makes the range invalid, so it is ignored like any other bad syntax.
+  if (match[2] !== '' && Number(match[2]) < start) return null;
+  if (start >= size) return 'unsatisfiable';
+  return { start, end: match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1) };
 }
 
 const missingMedia = (reason: string) => new AppError('not_found', 404, `Narration unavailable for this chapter: ${reason}`);
@@ -80,7 +81,8 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
     const ifRange = request.headers['if-range'];
     const range = ifRange && ifRange !== etag ? null : parseRange(request.headers.range, file.size);
     if (range === 'unsatisfiable') {
-      return reply.status(416).header('content-range', `bytes */${file.size}`).send();
+      // Only the file itself is immutable; a refusal is not cached.
+      return reply.status(416).header('cache-control', 'no-store').header('content-range', `bytes */${file.size}`).send();
     }
     if (range) {
       reply.status(206).header('content-range', `bytes ${range.start}-${range.end}/${file.size}`).header('content-length', range.end - range.start + 1);

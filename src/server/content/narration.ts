@@ -6,7 +6,7 @@ import { AppError } from '../platform/errors.ts';
 import { uuidv7 } from '../platform/ids.ts';
 import { log } from '../platform/log.ts';
 import type { AoChapter, ContentSource } from './aolab.ts';
-import { SourceError } from './aolab.ts';
+import { SourceError, isPermanent } from './aolab.ts';
 import { mediaExists, storeMedia } from './media-store.ts';
 import { mp3DurationSeconds } from './mp3.ts';
 
@@ -93,6 +93,9 @@ async function enabledNarrators(db: Queryable, translationId: TranslationId): Pr
   return result.rows.filter((n) => n.enabled);
 }
 
+// Naming an unknown or disabled narrator; retrying cannot fix it.
+export class NarratorError extends Error {}
+
 // Picks the narrators to import. Naming a disabled one is refused: it has no recorded license (I-14).
 export async function narratorsFor(db: Queryable, translationId: 'BSB', requested?: string[]): Promise<string[]> {
   const all = await db.query<NarratorRow>('SELECT id, display_name, license, enabled FROM narrators WHERE translation_id = $1 ORDER BY id', [translationId]);
@@ -100,8 +103,8 @@ export async function narratorsFor(db: Queryable, translationId: 'BSB', requeste
   if (!requested) return enabled;
   for (const id of requested) {
     const row = all.rows.find((n) => n.id === id);
-    if (!row) throw new Error(`narrator ${id} is not a ${translationId} narrator; known: ${all.rows.map((n) => n.id).join(', ')}`);
-    if (!row.enabled) throw new Error(`narrator ${id} is disabled: no license source is recorded for it. Enabled: ${enabled.join(', ')}`);
+    if (!row) throw new NarratorError(`narrator ${id} is not a ${translationId} narrator; known: ${all.rows.map((n) => n.id).join(', ')}`);
+    if (!row.enabled) throw new NarratorError(`narrator ${id} is disabled: no license source is recorded for it. Enabled: ${enabled.join(', ')}`);
   }
   return [...new Set(requested)];
 }
@@ -179,7 +182,7 @@ export async function importAudio(deps: NarrationDeps & { concurrency?: number }
     await eachLimited(scope.chapters, deps.concurrency ?? 2, async (chapter) => {
       const fail = (narratorId: string, error: unknown) => {
         const reason = (error as Error).message;
-        const permanent = error instanceof SourceError && error.status !== null && error.status < 500;
+        const permanent = error instanceof SourceError && isPermanent(error.status);
         log('warn', 'audio import failed', { bookId: scope.bookId, chapter, narratorId, error: reason });
         items.push({ bookId: scope.bookId, chapter, narratorId, status: 'failed', reason, permanent });
       };
@@ -298,23 +301,28 @@ export async function listRecordings(
     [translationId, book.id, chapter],
   );
   const response: RecordingsResponse & { queued: boolean } = { recordings: [], preparing: [], failed: [], queued: false };
+  // A recording whose file is gone from the volume is fetched again, like one never stored.
+  const fileMissing = new Set<string>();
   for (const row of rows.rows) {
     if (mediaExists(deps.mediaDir, row.media_sha256, row.mime_type)) response.recordings.push(toView(row));
-    else response.failed.push({ narratorId: row.narrator_id, reason: 'the media file is missing from the server' });
+    else fileMissing.add(row.narrator_id);
   }
 
-  const missing = narrators.filter((n) => !rows.rows.some((r) => r.narrator_id === n.id));
+  const missing = narrators.filter((n) => fileMissing.has(n.id) || !rows.rows.some((r) => r.narrator_id === n.id));
   for (const narrator of missing) {
     const now = clock.now();
     // Queue the import, or re-queue one that failed long enough ago; otherwise report the job as it stands.
+    // A recording stored since the listing above was read is not queued again.
     const job = await db.query<{ status: 'preparing' | 'failed'; reason: string | null; queued: boolean }>(
       `INSERT INTO audio_jobs (translation_id, book_id, chapter, narrator_id, status, next_attempt_at, updated_at)
-       VALUES ($1, $2, $3, $4, 'preparing', $5, $5)
+       SELECT $1::text, $2::text, $3::int, $4::text, 'preparing', $5::timestamptz, $5::timestamptz
+       WHERE $7::boolean OR NOT EXISTS (
+         SELECT 1 FROM recordings WHERE translation_id = $1::text AND book_id = $2::text AND chapter = $3::int AND narrator_id = $4::text)
        ON CONFLICT (translation_id, book_id, chapter, narrator_id) DO UPDATE
          SET status = 'preparing', reason = NULL, attempts = 0, next_attempt_at = $5, claimed_at = NULL, updated_at = $5
          WHERE audio_jobs.status = 'failed' AND audio_jobs.updated_at <= $5::timestamptz - make_interval(mins => $6)
        RETURNING status, reason, true AS queued`,
-      [translationId, book.id, chapter, narrator.id, now, failedRetryAfterMinutes],
+      [translationId, book.id, chapter, narrator.id, now, failedRetryAfterMinutes, fileMissing.has(narrator.id)],
     );
     const state =
       job.rows[0] ??
@@ -324,9 +332,9 @@ export async function listRecordings(
           [translationId, book.id, chapter, narrator.id],
         )
       ).rows[0];
-    if (!state) continue;
-    if (state.queued) response.queued = true;
-    if (state.status === 'failed') response.failed.push({ narratorId: narrator.id, reason: state.reason ?? 'import failed' });
+    if (state?.queued) response.queued = true;
+    if (state?.status === 'failed') response.failed.push({ narratorId: narrator.id, reason: state.reason ?? 'import failed' });
+    // No job: the worker stored the recording meanwhile, and the next poll lists it.
     else response.preparing.push(narrator.id);
   }
   return response;
@@ -349,9 +357,13 @@ export async function resolveRecording(
   return row && mediaExists(deps.mediaDir, row.media_sha256, row.mime_type) ? toView(row) : null;
 }
 
-// The stored file behind a media URL, if a recording still names it.
+// The stored file behind a media URL, if a recording by an enabled narrator still names it.
 export async function findMedia(db: Queryable, sha256: string): Promise<{ mimeType: string; bytes: number } | null> {
-  const result = await db.query<{ mime_type: string; bytes: string }>('SELECT mime_type, bytes FROM recordings WHERE media_sha256 = $1 LIMIT 1', [sha256]);
+  const result = await db.query<{ mime_type: string; bytes: string }>(
+    `SELECT r.mime_type, r.bytes FROM recordings r JOIN narrators n ON n.id = r.narrator_id
+     WHERE r.media_sha256 = $1 AND n.enabled AND n.translation_id = r.translation_id LIMIT 1`,
+    [sha256],
+  );
   const row = result.rows[0];
   return row ? { mimeType: row.mime_type, bytes: Number(row.bytes) } : null;
 }

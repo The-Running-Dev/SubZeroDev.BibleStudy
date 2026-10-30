@@ -48,16 +48,22 @@ interface Fixture {
   url: string;
   timings: Map<string, unknown>; // timing path → replacement `verses`, or 'missing' for a 404
   audioStatus: Map<string, number>; // audio path → status to reply with instead
+  redirects: Map<string, string>; // path → Location of a 302
   requests: string[];
   close(): Promise<void>;
 }
 
 async function startFixture(): Promise<Fixture> {
-  const fixture = { timings: new Map(), audioStatus: new Map(), requests: [] as string[] } as Fixture;
+  const fixture = { timings: new Map(), audioStatus: new Map(), redirects: new Map(), requests: [] as string[] } as Fixture;
   const server = createServer((request, response) => {
     const path = request.url ?? '';
     fixture.requests.push(path);
     const json = (body: unknown) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+    const location = fixture.redirects.get(path);
+    if (location) {
+      response.writeHead(302, { location }).end();
+      return;
+    }
     if (path === '/api/BSB/books.json') {
       const list: AoBook[] = books.map((b, i) => ({ id: b.id, name: b.name, order: i + 1, numberOfChapters: 1, sha256: 'book' }));
       json({ translation: { id: 'BSB', name: 'Berean Standard Bible', sha256: 'translation', numberOfBooks: list.length, totalNumberOfChapters: 2 }, books: list });
@@ -124,6 +130,7 @@ describe('narration from a fixture source', () => {
     await freshMember();
     fixture.timings.clear();
     fixture.audioStatus.clear();
+    fixture.redirects.clear();
     fixture.requests.length = 0;
     assert.equal((await runImport({ db: h.db, clock: h.clock, source }, { translationId: 'BSB' })).status, 'succeeded');
   });
@@ -237,15 +244,83 @@ describe('narration from a fixture source', () => {
     assert.equal(stored.json().recordings.length, 2);
   });
 
-  test('a recording whose file is gone is reported, not served', async () => {
+  test('a recording whose file is gone is not served, and is fetched again like one never stored', async () => {
+    const worker = createAudioWorker(deps());
     const summary = await importAudio(deps(), { translationId: 'BSB', bookId: 'JUD', chapters: [1], narrators: ['souer'] });
     const sha = summary.items[0].status === 'inserted' ? summary.items[0].mediaSha256 : '';
     rmSync(mediaFile(sha));
-    const listing = (await get('/api/content/BSB/JUD/1/recordings')).json();
-    assert.ok(listing.failed.some((f: { narratorId: string; reason: string }) => f.narratorId === 'souer' && f.reason === 'the media file is missing from the server'));
     const media = await get(`/media/${sha}`);
     assert.equal(media.statusCode, 404);
     assert.equal(media.json().message, 'Narration unavailable for this chapter: the media file is missing from the server');
+    const listing = await get('/api/content/BSB/JUD/1/recordings');
+    assert.equal(listing.statusCode, 202);
+    assert.deepEqual(listing.json(), { recordings: [], preparing: ['hays', 'souer'], failed: [] });
+
+    assert.equal(await worker.runOnce(), 2);
+    assert.equal(sha256Hex(readFileSync(mediaFile(sha))), sha);
+    const ready = await get('/api/content/BSB/JUD/1/recordings');
+    assert.equal(ready.statusCode, 200);
+    assert.deepEqual(
+      ready.json().recordings.map((r: { narratorId: string }) => r.narratorId),
+      ['hays', 'souer'],
+    );
+    assert.equal((await get(`/media/${sha}`)).statusCode, 200);
+  });
+
+  test('a redirect is followed only to a host the first URL could have named', async () => {
+    const audioUrl = `${fixture.url}/audio/JUD/1/souer.mp3`;
+    fixture.redirects.set('/moved/souer.mp3', '/audio/JUD/1/souer.mp3');
+    fixture.redirects.set('/away/souer.mp3', 'https://169.254.169.254/latest/meta-data');
+    fixture.redirects.set('/api/BSB/JUD/1.away.timing.json', 'https://example.com/timing.json');
+    fixture.redirects.set('/loop/a.mp3', '/loop/b.mp3');
+    fixture.redirects.set('/loop/b.mp3', '/loop/a.mp3');
+    const moved = await source.audio(`${fixture.url}/moved/souer.mp3`);
+    assert.deepEqual(moved.bytes, (await source.audio(audioUrl)).bytes);
+    await assert.rejects(source.audio(`${fixture.url}/away/souer.mp3`), /169\.254\.169\.254 is not an audio source/);
+    await assert.rejects(source.timing('/api/BSB/JUD/1.away.timing.json'), /not on http:\/\/127\.0\.0\.1/);
+    await assert.rejects(source.audio(`${fixture.url}/loop/a.mp3`), /more than 3 redirects/);
+    // Each refusal is final: none of them is retried.
+    assert.equal(fixture.requests.filter((r) => r === '/away/souer.mp3').length, 1);
+    assert.equal(fixture.requests.filter((r) => r === '/loop/a.mp3').length, 2);
+  });
+
+  test('408 and 429 are retried like a 5xx; other 4xx fail at once', async () => {
+    for (const [status, tries] of [
+      [429, 3],
+      [408, 3],
+      [503, 3],
+      [403, 1],
+    ]) {
+      fixture.requests.length = 0;
+      fixture.audioStatus.set('/audio/JUD/1/souer.mp3', status);
+      await assert.rejects(source.audio(`${fixture.url}/audio/JUD/1/souer.mp3`), new RegExp(`HTTP ${status}`));
+      assert.equal(fixture.requests.length, tries, `HTTP ${status}`);
+    }
+    // The worker keeps a rate-limited recording preparing rather than failing it.
+    const worker = createAudioWorker(deps());
+    fixture.audioStatus.set('/audio/JUD/1/souer.mp3', 429);
+    await get('/api/content/BSB/JUD/1/recordings');
+    await worker.runOnce();
+    const listing = (await get('/api/content/BSB/JUD/1/recordings')).json();
+    assert.deepEqual(listing.preparing, ['souer']);
+    assert.deepEqual(listing.failed, []);
+  });
+
+  test('a queued recording by a narrator disabled since fails for good; its stored media is no longer served', async () => {
+    const summary = await importAudio(deps(), { translationId: 'BSB', bookId: 'JUD', chapters: [1], narrators: ['souer'] });
+    const sha = summary.items[0].status === 'inserted' ? summary.items[0].mediaSha256 : '';
+    await get('/api/content/BSB/3JN/1/recordings');
+    await h.db.query(`UPDATE narrators SET enabled = false WHERE id = 'souer'`);
+    try {
+      assert.equal((await get(`/media/${sha}`)).statusCode, 404);
+      await createAudioWorker(deps()).runOnce();
+      const job = await h.db.query(`SELECT status, reason FROM audio_jobs WHERE book_id = '3JN' AND narrator_id = 'souer'`);
+      assert.equal(job.rows[0].status, 'failed');
+      assert.match(job.rows[0].reason, /narrator souer is disabled/);
+    } finally {
+      await h.db.query(`UPDATE narrators SET enabled = true WHERE id = 'souer'`);
+    }
+    assert.equal((await get(`/media/${sha}`)).statusCode, 200);
   });
 
   test('CSB lists no recordings; unimported text and unknown chapters are refused', async () => {
@@ -257,7 +332,7 @@ describe('narration from a fixture source', () => {
     assert.equal((await h.db.query('SELECT 1 FROM audio_jobs')).rowCount, 0);
   });
 
-  test('media needs a session; unknown hashes, stale validators and ranges past the end are handled', async () => {
+  test('media needs a session; unknown hashes, stale validators, backwards ranges and ranges past the end are handled', async () => {
     const summary = await importAudio(deps(), { translationId: 'BSB', bookId: 'JUD', chapters: [1], narrators: ['souer'] });
     const sha = summary.items[0].status === 'inserted' ? summary.items[0].mediaSha256 : '';
     const size = statSync(mediaFile(sha)).size;
@@ -268,6 +343,11 @@ describe('narration from a fixture source', () => {
     const past = await get(`/media/${sha}`, { range: `bytes=${size}-` });
     assert.equal(past.statusCode, 416);
     assert.equal(past.headers['content-range'], `bytes */${size}`);
+    assert.equal(past.headers['cache-control'], 'no-store', 'a refusal is not cached as immutable');
+    const backwards = await get(`/media/${sha}`, { range: 'bytes=5-2' });
+    assert.equal(backwards.statusCode, 200);
+    assert.equal(backwards.rawPayload.length, size);
+    assert.equal(backwards.headers['cache-control'], 'private, max-age=31536000, immutable');
     const stale = await get(`/media/${sha}`, { range: 'bytes=0-9', 'if-range': '"something-else"' });
     assert.equal(stale.statusCode, 200);
     assert.equal(stale.rawPayload.length, size);

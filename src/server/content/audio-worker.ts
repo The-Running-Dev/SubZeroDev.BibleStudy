@@ -2,7 +2,7 @@ import type { Clock } from '../platform/clock.ts';
 import type { Db } from '../platform/db.ts';
 import { log } from '../platform/log.ts';
 import type { ContentSource } from './aolab.ts';
-import { importAudio } from './narration.ts';
+import { NarratorError, importAudio } from './narration.ts';
 
 // Fetches recordings requested on first use (listRecordings queues them). One job per chapter and narrator;
 // a stored recording deletes its job, a failure is retried on the same schedule as email, then marked failed.
@@ -72,8 +72,9 @@ export function createAudioWorker(deps: { db: Db; clock: Clock; source: ContentS
     try {
       summary = await importAudio(deps, { translationId: job.translation_id, bookId: job.book_id, chapters: [job.chapter], narrators: [job.narrator_id] });
     } catch (error) {
-      // importAudio refuses a narrator that was disabled after the job was queued.
-      await fail(job, (error as Error).message, true);
+      // importAudio refuses a narrator that was disabled after the job was queued; anything else
+      // (the database, the media volume) may recover, so it follows the retry schedule.
+      await fail(job, (error as Error).message, error instanceof NarratorError);
       return;
     }
     const item = summary.items[0];

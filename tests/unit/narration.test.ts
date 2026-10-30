@@ -67,11 +67,11 @@ describe('Range header', () => {
     assert.deepEqual(parseRange('bytes=990-5000', 1000), { start: 990, end: 999 });
     assert.deepEqual(parseRange('bytes=-5000', 1000), { start: 0, end: 999 });
   });
-  test('serves the whole file for no range, several ranges or another unit', () => {
-    for (const header of [undefined, '', 'bytes=0-1,5-9', 'items=0-1', 'bytes=-']) assert.equal(parseRange(header, 1000), null, String(header));
+  test('serves the whole file for no range, several ranges, another unit or a backwards range', () => {
+    for (const header of [undefined, '', 'bytes=0-1,5-9', 'items=0-1', 'bytes=-', 'bytes=5-4']) assert.equal(parseRange(header, 1000), null, String(header));
   });
   test('a range past the end is unsatisfiable', () => {
-    for (const header of ['bytes=1000-', 'bytes=5-4', 'bytes=-0']) assert.equal(parseRange(header, 1000), 'unsatisfiable', header);
+    for (const header of ['bytes=1000-', 'bytes=1000-1001', 'bytes=-0']) assert.equal(parseRange(header, 1000), 'unsatisfiable', header);
   });
 });
 

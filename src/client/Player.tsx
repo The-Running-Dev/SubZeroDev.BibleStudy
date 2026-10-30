@@ -34,7 +34,12 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
           // A recording still being fetched is asked for again until it is stored or has failed.
           if (listing.preparing.length) timer = setTimeout(load, pollMs);
         })
-        .catch((error) => current && setState({ kind: 'error', message: messageFor(error) }));
+        .catch((error) => {
+          if (!current) return;
+          // A failed poll keeps the listing on screen and asks again; a failed first load is shown.
+          setState((previous) => (previous.kind === 'ready' ? previous : { kind: 'error', message: messageFor(error) }));
+          timer = setTimeout(load, pollMs);
+        });
     void load();
     return () => {
       current = false;
@@ -45,6 +50,10 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
   const recordings = state.kind === 'ready' ? state.listing.recordings : [];
   const recording: RecordingView | undefined = recordings.find((r) => r.narratorId === narratorId) ?? recordings[0];
   const starts = recording?.timing.status === 'verified' ? recording.timing.verseStarts : null;
+  // Each poll brings a new `starts` array; the follower below keys on the recording, not the array.
+  const startsRef = useRef(starts);
+  startsRef.current = starts;
+  const timedUrl = starts ? recording!.mediaUrl : null;
 
   // A new chapter or narrator starts with nothing highlighted.
   useEffect(() => {
@@ -57,9 +66,11 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
   // Follows the position: every frame while playing, and on each seek or time update while paused.
   useEffect(() => {
     const element = audio.current;
-    if (!element || !starts) return;
+    if (!element || !timedUrl) return;
     let frame = 0;
     const update = () => {
+      const starts = startsRef.current;
+      if (!starts) return;
       const t = element.currentTime;
       const stop = stopAt.current;
       if (stop && t >= stop.seconds) {
@@ -89,13 +100,15 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
     for (const name of events) element.addEventListener(name, update);
     element.addEventListener('seeked', release);
     element.addEventListener('play', onPlay);
+    // Already playing when the follower (re)attaches: follow from this frame.
+    if (!element.paused) frame = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(frame);
       for (const name of events) element.removeEventListener(name, update);
       element.removeEventListener('seeked', release);
       element.removeEventListener('play', onPlay);
     };
-  }, [starts, onVerse]);
+  }, [timedUrl, onVerse]);
 
   if (!translation) return null;
   if (translation.narration.state !== 'available') {
@@ -122,7 +135,7 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
 
   const listing = state.kind === 'ready' ? state.listing : null;
   const preparing = listing !== null && recordings.length === 0 && listing.preparing.length > 0;
-  const failed = listing !== null && recordings.length === 0 && listing.preparing.length === 0 ? listing.failed : [];
+  const failed = listing?.failed ?? [];
 
   return (
     <section className="player" aria-label="Narration">
@@ -131,7 +144,7 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
       {preparing && <p className="player-note" role="status">Preparing narration…</p>}
       {failed.length > 0 && (
         <p className="player-note" role="status">
-          Preparing narration failed — try later. ({failed.map((f) => f.reason).join('; ')})
+          {recordings.length ? 'Some narrators are unavailable' : 'Preparing narration failed — try later.'} ({failed.map((f) => f.reason).join('; ')})
         </p>
       )}
       {recording && (
