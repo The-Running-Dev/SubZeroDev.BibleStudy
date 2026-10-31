@@ -131,10 +131,14 @@ export function Reader(props: { groupId: string | null; userId: string }) {
         if (!unreachable(error)) return current && setText({ kind: 'unavailable', message: messageFor(error) });
         const device = await offlineChapter(props.userId, ref).catch(() => null);
         if (device && typeof device === 'object') audioUrl = device.audioUrl;
-        if (!current) return;
+        if (!current) {
+          if (audioUrl) URL.revokeObjectURL(audioUrl);
+          return;
+        }
         if (device === 'expired') setText({ kind: 'unavailable', message: 'The download of this chapter has expired — connect to download it again.' });
         else if (device) setText({ kind: 'ready', chapter: device.chapter, device });
-        else setText({ kind: 'unavailable', message: 'Not downloaded — needs a connection.' });
+        // A server that answered with an error is named as such; only no answer at all is "needs a connection".
+        else setText({ kind: 'unavailable', message: error instanceof ApiFailure ? messageFor(error) : 'Not downloaded — needs a connection.' });
       });
     return () => {
       current = false;

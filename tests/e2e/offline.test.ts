@@ -207,6 +207,47 @@ describe('installing and reading offline (S14)', () => {
     }
   });
 
+  test('an expired download keeps no chapter text or audio on the device, only its listing', async () => {
+    const context = await browser.newContext(mobile);
+    try {
+      const page = await open(context);
+      await download(page, 'Text and narration');
+      // A CSB download carries the 14-day expiry; this one is aged past it in place.
+      await page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve) => {
+          const req = indexedDB.open('biblestudy', 1);
+          req.onsuccess = () => resolve(req.result);
+        });
+        const all = await new Promise<{ expiresAt: string | null }[]>((resolve) => {
+          const req = db.transaction('downloads').objectStore('downloads').getAll();
+          req.onsuccess = () => resolve(req.result);
+        });
+        const tx = db.transaction('downloads', 'readwrite');
+        for (const record of all) tx.objectStore('downloads').put({ ...record, expiresAt: '2000-01-01T00:00:00Z' });
+        await new Promise((resolve) => (tx.oncomplete = resolve));
+        db.close();
+      });
+      await page.reload();
+      await page.getByText('This download has expired.').waitFor();
+      const left = await page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve) => {
+          const req = indexedDB.open('biblestudy', 1);
+          req.onsuccess = () => resolve(req.result);
+        });
+        const all = await new Promise<{ chapterBody: string; audio: unknown }[]>((resolve) => {
+          const req = db.transaction('downloads').objectStore('downloads').getAll();
+          req.onsuccess = () => resolve(req.result);
+        });
+        db.close();
+        return all.map((r) => ({ chapterBody: r.chapterBody, audio: r.audio }));
+      });
+      assert.deepEqual(left, [{ chapterBody: '', audio: null }]);
+      assert.deepEqual(await stored(page), { media: 0, downloads: 1 });
+    } finally {
+      await context.close();
+    }
+  });
+
   test('S14.6 install help names the Share steps on iPhone and the Chrome prompt or menu steps on Android', async () => {
     const help = async (userAgent: string) => {
       const context = await browser.newContext({ ...mobile, userAgent });

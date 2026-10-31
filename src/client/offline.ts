@@ -138,6 +138,12 @@ async function releaseAudio(url: string, except: { userId: Uuid; id: string } | 
   await (await caches.open(mediaCache)).delete(url);
 }
 
+// Shared audio is removed only while no download is writing: downloads hold this lock shared, removals exclusive.
+const mediaLock = 'media-v1';
+function withMediaLock<T>(mode: LockMode, work: () => Promise<T>): Promise<T> {
+  return navigator.locks ? navigator.locks.request(mediaLock, { mode }, work) : work();
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -214,6 +220,11 @@ export async function downloadChapter(
       await request((await store('downloads', 'readwrite')).put(record));
       // Downloading text only over an earlier download with narration drops the audio it no longer needs.
       if (previous?.audio && previous.audio.url !== record.audio?.url) await releaseAudio(previous.audio.url, null);
+      // Audio skipped as already cached can still be released by a failing download before this record was written.
+      if (await evicted(record)) {
+        await request((await store('downloads', 'readwrite')).delete([userId, id]));
+        throw new Error('The narration was removed while downloading; try again.');
+      }
       return { state: 'ready', expiresAt: record.expiresAt, withNarration: record.withNarration };
     } catch (error) {
       if (addedAudio) await releaseAudio(addedAudio, null).catch(() => undefined);
@@ -224,15 +235,17 @@ export async function downloadChapter(
   // One download per chapter at a time, across this browser's windows.
   if (!navigator.locks) return run();
   return navigator.locks.request(`download ${userId} ${id}`, { ifAvailable: true }, (lock) =>
-    lock ? run() : Promise.resolve<DownloadState>({ state: 'failed', reason: 'This chapter is already downloading in another window.' }),
+    lock ? withMediaLock('shared', run) : Promise.resolve<DownloadState>({ state: 'failed', reason: 'This chapter is already downloading in another window.' }),
   );
 }
 
-export async function removeDownload(userId: Uuid, ref: ChapterRef): Promise<void> {
-  const record = await getRecord(userId, ref);
-  if (!record) return;
-  await request((await store('downloads', 'readwrite')).delete([userId, record.id]));
-  if (record.audio) await releaseAudio(record.audio.url, null);
+export function removeDownload(userId: Uuid, ref: ChapterRef): Promise<void> {
+  return withMediaLock('exclusive', async () => {
+    const record = await getRecord(userId, ref);
+    if (!record) return;
+    await request((await store('downloads', 'readwrite')).delete([userId, record.id]));
+    if (record.audio) await releaseAudio(record.audio.url, null);
+  });
 }
 
 async function evicted(record: DownloadRecord): Promise<boolean> {
@@ -241,11 +254,23 @@ async function evicted(record: DownloadRecord): Promise<boolean> {
 
 const isExpired = (record: DownloadRecord) => record.expiresAt !== null && Date.parse(record.expiresAt) <= Date.now();
 
+// Licensed text is kept no longer than the server may keep it (I-11): an expired download keeps only its listing.
+async function expire(record: DownloadRecord): Promise<void> {
+  if (record.chapterBody === '' && record.audio === null) return;
+  await withMediaLock('exclusive', async () => {
+    await request((await store('downloads', 'readwrite')).put({ ...record, chapterBody: '', audio: null, recording: null }));
+    if (record.audio) await releaseAudio(record.audio.url, null);
+  });
+}
+
 export async function downloadState(userId: Uuid, ref: ChapterRef): Promise<DownloadState> {
   if (!storageAvailable()) return { state: 'absent' };
   const record = await getRecord(userId, ref);
   if (!record) return { state: 'absent' };
-  if (isExpired(record)) return { state: 'expired' };
+  if (isExpired(record)) {
+    await expire(record);
+    return { state: 'expired' };
+  }
   // The browser may clear cached audio under storage pressure; a half-kept download is not offered.
   if (await evicted(record)) {
     await request((await store('downloads', 'readwrite')).delete([userId, record.id]));
@@ -264,9 +289,11 @@ export async function listDownloads(userId: Uuid): Promise<DownloadSummary[]> {
   if (!storageAvailable()) return [];
   const kept: DownloadSummary[] = [];
   for (const record of await allRecords(userId)) {
-    if (await evicted(record)) continue;
+    const expired = isExpired(record);
+    if (expired) await expire(record);
+    else if (await evicted(record)) continue;
     const { translationId, bookId, chapter, withNarration, totalBytes } = record;
-    kept.push({ translationId, bookId, chapter, withNarration, totalBytes, expired: isExpired(record) });
+    kept.push({ translationId, bookId, chapter, withNarration, totalBytes, expired });
   }
   return kept;
 }
@@ -275,7 +302,10 @@ export async function offlineChapter(userId: Uuid, ref: ChapterRef): Promise<Off
   if (!storageAvailable()) return null;
   const record = await getRecord(userId, ref);
   if (!record) return null;
-  if (isExpired(record)) return 'expired';
+  if (isExpired(record)) {
+    await expire(record);
+    return 'expired';
+  }
   let audioUrl: string | null = null;
   if (record.audio) {
     const cached = await (await caches.open(mediaCache)).match(record.audio.url);
