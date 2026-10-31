@@ -148,7 +148,7 @@ try {
   if (process.platform !== 'win32') chmodSync(backupDir, 0o777);
   docker(['network', 'create', proxyNetwork], { quiet: true });
 
-  // 1. Up with the example values; the image's health check is a GET of /__build-id.
+  // 1. Up with the example values; the image's health check is a GET of /__health, which queries the database.
   compose(projectA, ['up', '-d', '--wait', '--wait-timeout', '180']);
   const buildId = compose(projectA, ['exec', '-T', 'biblestudy', 'node', '-e', "fetch('http://127.0.0.1:3000/__build-id').then(r=>r.text()).then(t=>console.log(t))"]).out.trim();
   record('S7.2 /__build-id on the app port', buildId === JSON.stringify({ buildId: expectedBuild }), buildId);

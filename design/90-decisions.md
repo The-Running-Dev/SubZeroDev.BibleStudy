@@ -5,8 +5,26 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 ## Open
 - Which real phones run the device checks (DOD-23, DOD-28, DOD-29).
 - Whether `biblestudy.subzerodev.com` is the hostname, and who adds its DNS record and proxy route.
+- The owner's status page is promised (10-design failure modes, the contract's mail errors, D-2026-10-30-15) but not built. Escalated to `/plan` for a slice.
 
 ---
+
+### 2026-11-01 — Align after S18: the design follows the code on modules and errors, and a database outage is now detected
+- **Context:** An `/align` pass compared the design and contract with the tree after S18 and found four differences that were decisions.
+- **Chosen:**
+  - **Modules.** The module table in 10-design now lists the real imports. The graph has one cycle, `schedule` ↔ `reminders`, inside one transaction. A module writes only its own tables; a query may read others'. The demo seed moved out of `platform` into its own `demo` module, because a sink may not import `groups` and `questions`.
+  - **Database down.** `GET /__health` runs `SELECT 1` and is the image's health check. A WebSocket whose message the database cannot serve closes with `closeUnavailable` (4503), and the client shows "Server unavailable" and reconnects with backoff. Docker restarts on exit only, so an unhealthy app is shown, not restarted; the design had said Portainer restarts it.
+  - **Errors.** The contract follows the code: `assistant_offline` and `turn_in_progress` are retryable; `preparing` is a 202 response, not an error; `upstream_failed` was never raised and is removed from `ErrorCode`; the other uses of `rate_limited`, `not_found` and `invalid_request` are listed.
+- **Rejected:** changing the code to the contract's errors. The retryable flags drive the client's retry, which works and is tested; the contract was the stale side.
+- **Rejected:** building the status page in this pass. It is a feature, not drift, and needs a slice.
+
+### 2026-11-01 — S18: the demo seed is synthetic and sends nothing
+- **Context:** S18 must let the owner run a demo without inviting real people or sending mail.
+- **Chosen:**
+  - `npm run demo:seed` creates three `@example.test` members, their invitations accepted in the database, reminders off, three questions with replies on Romans 1–2 and a few notes. It refuses an `OWNER_EMAIL` outside `example.test`, and a second run changes nothing.
+  - `.env.example` comments out `ASSISTANT_OWNER_EMAIL` and `CONNECTOR_TOKEN`: config rejects the placeholder token, so the server did not start for anyone following the README.
+  - The Vite dev proxy matches `^/api/` (it had also caught the client's own `/api.ts`) and proxies `/media/` and `/ws`.
+- **Rejected:** a demo that sends real invitations to the owner's address. The brief forbids invitations to prepare a demo.
 
 ### 2026-10-31 — S17: small phones are checked in Chromium emulation, and the composers keep their buttons with CSS alone
 - **Context:** S17 must show every main screen at 320×568 and 360×640, in either orientation and at 200 % text, without sideways scroll, and keep the composers' buttons in view with the on-screen keyboard open.

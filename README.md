@@ -102,7 +102,7 @@ docker build --build-arg BUILD_ID=$(git rev-parse --short HEAD) -t biblestudy .
 docker run -p 3000:3000 -e DATABASE_URL=... -e APP_SECRET=... -e SMTP_URL=... -e OWNER_EMAIL=... biblestudy
 ```
 
-`GET /__build-id` returns the running build. See `.env.example` for every variable. Import the text inside the running container with `docker exec <container> node src/server/content/import-cli.ts --translation BSB`. Mount a volume at `/app/data/media` (the image's `MEDIA_DIR`) so recordings survive a new container.
+`GET /__build-id` returns the running build; `GET /__health` checks the database. See `.env.example` for every variable. Import the text inside the running container with `docker exec <container> node src/server/content/import-cli.ts --translation BSB`. Mount a volume at `/app/data/media` (the image's `MEDIA_DIR`) so recordings survive a new container.
 
 On the VPS the app runs as the [compose.yaml](compose.yaml) stack with PostgreSQL, a one-shot migration and a nightly backup. [docs/deploy.md](docs/deploy.md) covers the one-time setup, environment, rollback, backup and restore. `npm run drill` checks that stack end to end in Docker.
 

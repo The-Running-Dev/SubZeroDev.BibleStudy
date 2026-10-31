@@ -15,6 +15,7 @@ import type { Command,
   GroupProgressView, PlaybackState,
   QuestionView, ServerMessage,
   WrapUpView } from '../../src/shared/api.ts';
+import { closeUnavailable } from '../../src/shared/api.ts';
 import type { Harness } from '../support/harness.ts';
 import { clearMailbox, databaseUrl, ownerEmail, signIn, smtpUrl, startHarness, truncateAll } from '../support/harness.ts';
 import { frameSeconds, synthMp3 } from '../support/mp3.ts';
@@ -540,6 +541,30 @@ async function waitListening(port: number, server: { output: string[] }): Promis
 function exited(child: ChildProcess): Promise<void> {
   return child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise((resolve) => child.once('exit', () => resolve()));
 }
+
+describe('database outage', () => {
+  test('a message the database cannot serve closes the channel with closeUnavailable, and a reconnect works once it is back', async () => {
+    const { owner, groupId } = await ownerAndMember();
+    const { sessionId } = await start(owner.cookie, groupId);
+    const client = await connect(owner.cookie);
+    const pool = h.db as unknown as { query: unknown; connect: unknown };
+    const down = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:55432'), { code: 'ECONNREFUSED' });
+    };
+    pool.query = down;
+    pool.connect = down;
+    try {
+      client.send({ t: 'join', sessionId });
+      assert.equal(await client.closed, closeUnavailable);
+    } finally {
+      delete pool.query;
+      delete pool.connect;
+    }
+    const again = await connect(owner.cookie);
+    assert.equal((await again.join(sessionId)).t, 'snapshot');
+    await closeClient(again);
+  });
+});
 
 describe('S5.8 restart', () => {
   test('killing and restarting the server during playback leaves the session paused for server_restart at the derived position ±1 s', async () => {

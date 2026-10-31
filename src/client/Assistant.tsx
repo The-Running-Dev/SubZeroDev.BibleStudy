@@ -210,7 +210,7 @@ function Conversation(props: {
 
   const active = turns.find((t) => !isTerminal(t)) ?? null;
   const online = props.status.state === 'online';
-  const reconnecting = live === 'reconnecting' && active !== null;
+  const reconnecting = (live === 'reconnecting' || live === 'unavailable') && active !== null;
 
   async function ask(event: FormEvent) {
     event.preventDefault();

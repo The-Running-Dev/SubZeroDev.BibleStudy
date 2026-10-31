@@ -274,6 +274,22 @@ describe('S1.8 authentication', () => {
     const response = await h.app.inject({ method: 'GET', url: '/__build-id' });
     assert.deepEqual(response.json(), { buildId: 'test-build' });
   });
+
+  test('/__health is public and turns 503 unavailable while the database cannot answer', async () => {
+    assert.deepEqual((await h.app.inject({ method: 'GET', url: '/__health' })).json(), { ok: true });
+    const pool = h.db as unknown as { query: unknown };
+    pool.query = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:55432'), { code: 'ECONNREFUSED' });
+    };
+    try {
+      const response = await h.app.inject({ method: 'GET', url: '/__health' });
+      assert.equal(response.statusCode, 503);
+      assert.equal(response.json().error, 'unavailable');
+    } finally {
+      delete pool.query;
+    }
+    assert.equal((await h.app.inject({ method: 'GET', url: '/__health' })).statusCode, 200);
+  });
 });
 
 describe('mail retries', () => {

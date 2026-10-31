@@ -27,6 +27,14 @@ export async function withTransaction<T>(db: Db, work: (tx: Tx) => Promise<T>): 
   }
 }
 
+// The database is down or unreachable, as opposed to a query that failed: a refused connection, a
+// connection-class SQLSTATE (08xxx), an administrator shutdown, or a pool that could not connect.
+export function databaseUnavailable(error: unknown): boolean {
+  if (error instanceof AppError) return error.code === 'unavailable';
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && (code === 'ECONNREFUSED' || code.startsWith('08') || code === '57P01');
+}
+
 async function connect(db: Db): Promise<Tx> {
   try {
     return await db.connect();

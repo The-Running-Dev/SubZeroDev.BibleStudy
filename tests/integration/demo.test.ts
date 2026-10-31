@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createAoLabSource } from '../../src/server/content/aolab.ts';
 import { runImport } from '../../src/server/content/import.ts';
-import { demoDomain, seedDemo } from '../../src/server/platform/demo.ts';
+import { demoDomain, seedDemo } from '../../src/server/demo/demo.ts';
 import type { Harness } from '../support/harness.ts';
 import { clearMailbox, messagesTo, ownerEmail, startHarness } from '../support/harness.ts';
 

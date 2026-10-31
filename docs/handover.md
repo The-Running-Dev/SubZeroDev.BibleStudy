@@ -91,4 +91,6 @@ Each needs something only the owner can provide. Nothing here was replaced by a 
 - One group per instance. The data model is keyed by group, so a second group needs no migration, but there is no UI for it.
 - The study assistant is the owner's alone and needs their PC on with the connector running.
 - Codes and reminders go only through the relay in `SMTP_URL`; until a real one is set, they reach no one outside Mailpit.
+- The owner's status page (mail failures, health) is designed but not built; it needs a slice from `/plan`.
+- An unhealthy app (database down) shows unhealthy in Portainer and is not restarted; it serves again once the database is back.
 - Layout was checked in Chromium's emulation, not in Safari. iOS-specific behaviour (keyboard resizing, standalone safe areas) is unverified until S17.4.

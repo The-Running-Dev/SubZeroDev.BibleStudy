@@ -129,6 +129,7 @@ function connectionNote(status: LiveStatus): string | null {
   if (status === 'open') return null;
   if (status === 'connecting') return 'Connecting…';
   if (status === 'reconnecting') return 'Reconnecting…';
+  if (status === 'unavailable') return 'Server unavailable. Reconnecting…';
   if (status.closed === 'not_member') return 'You are no longer a member of this group.';
   if (status.closed === 'signed_out') return 'You were signed out. Reload to sign in again.';
   return 'Too many open tabs. Close another tab and reload.';

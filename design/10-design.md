@@ -215,24 +215,28 @@ The server is one deployable split into modules that talk only through each modu
 |---|---|---|---|
 | `platform` | Config loading, DB pool and migrations, clock, logger, ID generation | — | `Config`, `Db`, `Clock` |
 | `mail` | EmailJob outbox, SMTP transport, retry loop | `platform` | `enqueueEmail`, delivery worker |
-| `identity` | Users, LoginCodes, AuthSessions, profile edits | `platform`, `mail` | sign-in flow, `authenticate(request)`, profile API |
-| `groups` | Group, Membership, Invitation, the authorization rules | `platform`, `identity` | `requireMember`, `requireOwner`, invitation API |
+| `identity` | Users, LoginCodes, AuthSessions, profile edits | `platform`, `mail`, `groups` (sign-in accepts the invitation) | sign-in flow, `authenticate(request)`, profile API |
+| `groups` | Group, Membership, Invitation, the authorization rules | `platform` | `requireMember`, `requireOwner`, invitation API |
 | `content` | Translations, Chapters, Narrators, Recordings, import, media serving, CSB refresh | `platform` | catalog/chapter/media API, `resolveRecording`, importer CLI |
-| `schedule` | Occurrences, time-zone math | `platform`, `groups` | occurrence API, `localizeOccurrence` |
-| `reminders` | ReminderPreference, ReminderDelivery, the reminder tick | `platform`, `schedule`, `identity`, `groups`, `mail`, `progress` | preferences API, scheduler |
-| `progress` | GroupProgress | `platform`, `groups`, `content` | `currentStoppingPoint`, `confirmStoppingPoint` |
-| `questions` | Questions, Replies, Dispositions | `platform`, `groups`, `content` | question API, `questionsForPassage` |
+| `schedule` | Occurrences, time-zone math | `platform`, `groups`, `identity` (time-zone validation), `reminders` (suppressing a changed meeting's deliveries) | occurrence API, `localizeOccurrence` |
+| `reminders` | ReminderPreference, ReminderDelivery, the reminder tick | `platform`, `schedule`, `groups`, `mail`, `progress` | preferences API, scheduler |
+| `progress` | GroupProgress | `platform`, `groups` | `currentStoppingPoint`, `confirmStoppingPoint` |
+| `questions` | Questions, Replies, Dispositions | `platform`, `groups` | question API, `questionsForPassage` |
 | `study` | StudySession, PlaybackState, SessionCommand, Presence, the WebSocket channel | `platform`, `groups`, `content`, `questions`, `progress` | session API, realtime channel |
-| `personal` | Notes, NoteConflicts, SoloPosition, SyncOperations, export | `platform`, `identity` | sync API, export |
-| `assistant` | Conversations, Turns, Transcript, the connector link endpoint | `platform`, `identity`, `content`, `personal` | assistant API, connector endpoint |
-| `web` | HTTP routing, cookie auth, static app with caching headers, `/__build-id` | every module above | the deployable |
+| `personal` | Notes, NoteConflicts, SoloPosition, SyncOperations, export | `platform` | sync API, export |
+| `assistant` | Conversations, Turns, Transcript, the connector link endpoint | `platform`, `content`, `personal`, `study` (the realtime hub's type, to push turn events) | assistant API, connector endpoint |
+| `web` | HTTP routing, cookie auth, static app with caching headers, `/__build-id`, `/__health` | every module above | the deployable |
+| `demo` | The synthetic demo group (`npm run demo:seed`) | `platform`, `groups`, `questions`, `personal` | `seedDemo`, demo CLI |
 
-Two facts confirm the server graph is acyclic:
+The arrows are imports. Three facts describe the graph:
 
 - `platform` is the only sink.
+- It has one cycle, `schedule` ↔ `reminders`: a moved or cancelled meeting suppresses its owed deliveries, and the reminder tick materializes the meetings ahead. Both run inside the caller's transaction, so the pair changes together.
 - `progress` depends on nothing that depends on it. Neither `reminders` nor `study` is a dependency of `progress`.
 
-`web` is the only composition root.
+A module writes only its own tables; the one exception is `schedule`, which writes the `groups.schedule_*` columns it owns. A query may read another module's tables, to join or to check state inside one transaction, rather than calling through that module's surface.
+
+`web` is the only composition root for the server; `demo` and the CLIs compose what they need on their own.
 
 **Connector** (separate process on the owner's PC): owns the AgentConsole child process and the outbound link to the server. It depends on the server's connector protocol and AgentConsole's runtime protocol, and nothing on the server depends on its internals.
 
@@ -347,7 +351,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
   - a `backup` service: a nightly `pg_dump` plus a media manifest, with a shared deduplicated store for recordings and a restore that checks every checksum first (`docs/deploy.md`).
 - The stack joins the existing `proxy-net`, and the existing reverse proxy terminates TLS for the app hostname (proposed: `biblestudy.subzerodev.com`).
 - Migrations run in the `migrate` service, each in one transaction, before the new app starts. Compose stops the old app before it waits on `migrate`, so a failed migration leaves the site down, with nothing applied, until the previous image is redeployed by pinning `BIBLESTUDY_IMAGE` (the drill checks both). The app also migrates on start, before the listener opens, and exits non-zero if that fails, so it never serves a half-migrated schema.
-- `/__build-id` reports the commit for deploy verification.
+- `/__build-id` reports the commit for deploy verification. `/__health` runs `SELECT 1` and is the image's health check.
 
 **Content:**
 - An importer command, run inside the `biblestudy` container on the VPS, fills Chapters, Recordings and the media volume and writes an ImportManifest.
@@ -387,8 +391,8 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 - Left behind: the User without a membership.
 
 **PostgreSQL down**
-- Detected by: query error or health check.
-- System: HTTP 503 and the WebSocket closes with a retry code. The container health check fails, so Portainer restarts it.
+- Detected by: query error, or the container health check, `GET /__health`, which runs `SELECT 1`.
+- System: HTTP 503 `unavailable`, and the WebSocket closes with `closeUnavailable` (4503); the client shows "Server unavailable" and reconnects with backoff. The container turns unhealthy, which Portainer shows. Docker's `restart: unless-stopped` acts on an exit only, so the app is not restarted for it, and needs not be: it reconnects once the database is back.
 - Users see: "Server unavailable"; downloaded chapters, notes and solo listening keep working.
 - Left behind: nothing partial, because every write is a single transaction.
 

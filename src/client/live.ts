@@ -1,9 +1,10 @@
 // The realtime channel: one WebSocket per tab, a server clock estimate, and the joined study session.
 // Commands are never queued: a command sent while disconnected is refused, and a reconnect starts from a fresh snapshot.
 import type { ClientMessage, Command, ServerMessage } from '../shared/api.ts';
-import { closeNotMember, closeSignedOut, closeTooMany } from '../shared/api.ts';
+import { closeNotMember, closeSignedOut, closeTooMany, closeUnavailable } from '../shared/api.ts';
 
-export type LiveStatus = 'connecting' | 'open' | 'reconnecting' | { closed: 'not_member' | 'signed_out' | 'too_many' };
+// 'unavailable' is reconnecting after the server said its database is down.
+export type LiveStatus = 'connecting' | 'open' | 'reconnecting' | 'unavailable' | { closed: 'not_member' | 'signed_out' | 'too_many' };
 
 export interface Live {
   join(sessionId: string): void;
@@ -95,7 +96,7 @@ export function connectLive(handlers: { onMessage: (message: ServerMessage) => v
         return;
       }
       attempt += 1;
-      handlers.onStatus('reconnecting');
+      handlers.onStatus(event.code === closeUnavailable ? 'unavailable' : 'reconnecting');
       const delay = Math.min(maxBackoffMs, 500 * 2 ** (attempt - 1)) * (0.75 + Math.random() * 0.5);
       retryTimer = setTimeout(open, delay);
     };
