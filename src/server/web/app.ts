@@ -18,6 +18,7 @@ import { registerGroupRoutes } from './group-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
 import { registerProgressRoutes } from './progress-routes.ts';
 import { registerQuestionRoutes } from './question-routes.ts';
+import { registerReminderRoutes } from './reminder-routes.ts';
 import { registerScheduleRoutes } from './schedule-routes.ts';
 import { registerStudyRoutes } from './study-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
@@ -117,6 +118,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerQuestionRoutes(app, deps, hub);
   registerProgressRoutes(app, deps);
   registerScheduleRoutes(app, deps);
+  registerReminderRoutes(app, deps);
   registerAssistantRoutes(app, deps, hub);
 
   const staticRoot = resolve(config.staticDir);

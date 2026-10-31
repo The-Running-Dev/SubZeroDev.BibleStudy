@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { addDays, instantFor, isLocalDate, isoWeekday, localizeOccurrence, wallClock } from '../../src/shared/zones.ts';
+import { addDays, instantFor, isLocalDate, isoWeekday, localizeOccurrence, wallClock, zoneAbbreviation } from '../../src/shared/zones.ts';
 
 describe('S10 wall-clock conversion in IANA zones', () => {
   test('S10.1 Monday 2 November 2026 06:15 in Chicago is 12:15Z and 14:15 in Sofia', () => {
@@ -38,6 +38,18 @@ describe('S10 wall-clock conversion in IANA zones', () => {
         assert.ok(back === ms || back === ms - 60 * 60 * 1000, `${zone} ${new Date(ms).toISOString()}`);
       }
     }
+  });
+
+  test('zone names: the US name, else the British one, else the offset', () => {
+    const winter = Date.parse('2026-11-02T12:15:00Z');
+    const summer = Date.parse('2026-07-06T11:15:00Z');
+    assert.equal(zoneAbbreviation(winter, 'Europe/Sofia'), 'EET');
+    assert.equal(zoneAbbreviation(summer, 'Europe/Sofia'), 'EEST');
+    assert.equal(zoneAbbreviation(summer, 'Europe/London'), 'BST');
+    assert.equal(zoneAbbreviation(winter, 'America/Chicago'), 'CST');
+    assert.equal(zoneAbbreviation(summer, 'America/Chicago'), 'CDT');
+    assert.equal(zoneAbbreviation(winter, 'Asia/Tokyo'), 'GMT+9');
+    assert.equal(zoneAbbreviation(winter, 'UTC'), 'UTC');
   });
 
   test('dates: validity, weekdays and day arithmetic across month and year ends', () => {

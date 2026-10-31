@@ -8,6 +8,7 @@ import type { ContentSource } from '../../src/server/content/aolab.ts';
 import { createAudioWorker } from '../../src/server/content/audio-worker.ts';
 import type { AudioWorker } from '../../src/server/content/audio-worker.ts';
 import { createOutbox } from '../../src/server/mail/outbox.ts';
+import type { Outbox } from '../../src/server/mail/outbox.ts';
 import { createSmtpTransport } from '../../src/server/mail/transport.ts';
 import type { MailTransport } from '../../src/server/mail/transport.ts';
 import { createMailWorker } from '../../src/server/mail/worker.ts';
@@ -19,6 +20,8 @@ import { createPool } from '../../src/server/platform/db.ts';
 import type { Db } from '../../src/server/platform/db.ts';
 import { migrate } from '../../src/server/platform/migrate.ts';
 import { deriveKey } from '../../src/server/platform/secrets.ts';
+import { reminderTick } from '../../src/server/reminders/reminders.ts';
+import type { TickResult } from '../../src/server/reminders/reminders.ts';
 import { createRealtimeHub } from '../../src/server/study/realtime.ts';
 import type { RealtimeHub } from '../../src/server/study/realtime.ts';
 import { buildApp } from '../../src/server/web/app.ts';
@@ -37,6 +40,9 @@ export interface Harness {
   audioWorker: AudioWorker;
   transport: MailTransport;
   hub: RealtimeHub;
+  outbox: Outbox;
+  // One reminder tick at the fake clock's time; tests call it instead of running the minute loop.
+  tick(): Promise<TickResult>;
   close(): Promise<void>;
 }
 
@@ -83,11 +89,12 @@ export async function startHarness(
   const source = options.source ?? createAoLabSource({ baseUrl: config.aolabBaseUrl });
   const audioWorker = createAudioWorker({ db, clock, source, mediaDir: config.mediaDir });
   const hub = createRealtimeHub({ emptyRoomGraceMs: options.emptyRoomGraceMs });
+  const outbox = createOutbox({ clock, sealKey });
   const app = await buildApp({
     config,
     db,
     clock,
-    outbox: createOutbox({ clock, sealKey }),
+    outbox,
     codePepper: deriveKey(config.appSecret, 'login-code-pepper'),
     onEmailQueued: () => worker.notify(),
     onAudioQueued: () => audioWorker.notify(),
@@ -102,6 +109,8 @@ export async function startHarness(
     audioWorker,
     transport,
     hub,
+    outbox,
+    tick: () => reminderTick({ db, clock, outbox, publicUrl: config.publicUrl, onEmailQueued: () => worker.notify() }),
     async close() {
       await app.close();
       transport.close();

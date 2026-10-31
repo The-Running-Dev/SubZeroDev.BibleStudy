@@ -186,6 +186,13 @@ export interface ScheduleRequest {
   timeZone: IanaZone;
 }
 
+// GET/PUT /api/groups/:groupId/reminders: the viewer's own reminder emails for the group's meetings. Offsets are
+// minutes before the meeting, 5 to 10080 (a week), at most five.
+export interface ReminderPreference {
+  enabled: boolean;
+  offsetsMinutes: number[];
+}
+
 // POST /api/invitations/accept, for a member who is already signed in when they open a link.
 export interface AcceptInvitationResponse {
   joinedGroupId: Uuid | null;

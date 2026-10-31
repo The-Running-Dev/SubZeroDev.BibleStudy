@@ -192,7 +192,7 @@ Acceptance:
 Out of scope: reminder emails (S11); calendar export (P1).
 
 ## S11 — Get reminded before each study
-Status: todo
+Status: done
 Delivers: Each member gets an email a day and an hour before each study, in their own time, with the passage and an Open study link. They can change when reminders come or turn them off without affecting anyone else.
 Touches: reminders (preferences, `reminderTick`), mail, schedule
 Depends on: S10, S1

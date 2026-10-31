@@ -296,9 +296,9 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 ### 3. A weekly reminder
 
 1. Every minute, `reminders` materializes Occurrences eight weeks ahead.
-2. For each `(occurrence, member, offset)` in force it upserts a `pending` ReminderDelivery, keyed by the occurrence's current `revision`.
-3. When an occurrence is moved or cancelled, its revision changes. Pending deliveries for older revisions, or for a cancelled occurrence, become `suppressed` in the same transaction.
-4. When `sendAfter ≤ now` for a `pending` delivery, the occurrence is not cancelled, the member still belongs, and their preference still includes the offset, `reminders` enqueues one EmailJob with idempotency key `reminder:<deliveryId>`, then marks the delivery `sent` once the job is accepted by SMTP.
+2. For each `(occurrence, member, offset)` in force and still ahead it inserts a `pending` ReminderDelivery, keyed by the occurrence's current `revision`. A revision that changed only the planned passage keeps a delivery already queued or sent for the same send time, so it is not sent twice.
+3. Each tick suppresses pending deliveries that are no longer owed: an older revision, a cancelled or deleted occurrence, a removed member, or an offset the member's preference no longer includes. A delivery whose job is still queued has the job withdrawn first; one already being sent is left to finish.
+4. When `sendAfter ≤ now` for a `pending` delivery with no job, `reminders` enqueues one EmailJob with idempotency key `reminder:<deliveryId>`. The next ticks copy the job's outcome to the delivery: `sent` once SMTP accepts it, `failed` once the outbox gives up.
 5. The email shows the start in the recipient's zone (date, time, zone abbreviation and name), the planned passage (or the group's stopping point when none is planned), and an Open study link to the study page, which has no voice to join.
 6. If a delivery's send time passed more than 30 minutes ago (for example after downtime), it is `suppressed` rather than sent late.
 
