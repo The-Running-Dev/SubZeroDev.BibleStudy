@@ -109,6 +109,7 @@ describe('CSB from API.Bible (S13)', () => {
     assert.deepEqual((await csbOf()).availability, { state: 'available' });
     const response = await get('/api/content/CSB/rom/1');
     assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['cache-control'], 'private, no-store');
     const chapter = response.json();
     assert.deepEqual(
       { ...chapter, contentSha256: undefined },
