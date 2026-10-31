@@ -20,7 +20,9 @@
     "connector": "node src/connector/main.ts",
     "dev": "node --watch src/server/web/main.ts",
     "dev:client": "vite",
-    "dev:services": "docker compose -f compose.dev.yaml up -d"
+    "dev:services": "docker compose -f compose.dev.yaml up -d",
+    "drill": "node scripts/drill-stack.ts",
+    "backup": "node src/server/platform/backup-cli.ts"
   },
   "license": "MIT",
   "dependencies": {

@@ -338,16 +338,18 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 **Server:**
 - GitHub Actions builds one container image per merge to `main` and pushes it to GHCR (`ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`).
 - When the repository variable `DEPLOY_ENABLED` is true, it then calls the Portainer redeploy webhook stored in the `PORTAINER_REDEPLOY_WEBHOOK_URL` secret. This is the same pipeline Adventures uses.
-- The Portainer Git stack, defined by the repository's compose file, runs:
-  - the app container;
+- The Portainer Git stack, defined by the repository's `compose.yaml`, runs:
+  - the app container (service `biblestudy`);
   - PostgreSQL with a named volume;
-  - a named media volume.
+  - a named media volume;
+  - a one-shot `migrate` service that the app waits on;
+  - a `backup` service: a nightly `pg_dump` plus a media manifest, with a shared deduplicated store for recordings and a restore that checks every checksum first (`docs/deploy.md`).
 - The stack joins the existing `proxy-net`, and the existing reverse proxy terminates TLS for the app hostname (proposed: `biblestudy.subzerodev.com`).
-- Migrations run on container start, before the listener opens. A failed migration exits the container, and Portainer keeps the previous one running.
+- Migrations run in the `migrate` service, each in one transaction, before the new app starts. Compose stops the old app before it waits on `migrate`, so a failed migration leaves the site down, with nothing applied, until the previous image is redeployed by pinning `BIBLESTUDY_IMAGE` (the drill checks both). The app also migrates on start, before the listener opens, and exits non-zero if that fails, so it never serves a half-migrated schema.
 - `/__build-id` reports the commit for deploy verification.
 
 **Content:**
-- An importer command, run inside the app container on the VPS, fills Chapters, Recordings and the media volume and writes an ImportManifest.
+- An importer command, run inside the `biblestudy` container on the VPS, fills Chapters, Recordings and the media volume and writes an ImportManifest.
 - Full BSB text is imported once. Audio is imported per chapter:
   - Romans for every enabled narrator during setup;
   - any other chapter on first request (shown as "Preparing narration").
