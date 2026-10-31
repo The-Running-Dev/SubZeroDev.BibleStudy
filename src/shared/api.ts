@@ -41,6 +41,7 @@ export type ErrorCode =
   | 'stale_revision'
   | 'empty_body'
   | 'stale_progress'
+  | 'payload_too_large'
   | 'internal';
 
 export interface ApiError {
@@ -353,6 +354,58 @@ export interface EditPostRequest {
 
 export interface DeletePostResponse {
   outcome: 'deleted' | 'body_removed';
+}
+
+// ---- personal ----
+
+// A member's own notes and solo reading position, synced between their devices. No group endpoint returns them (I-21).
+export type NoteAnchor = PassageRef & { translationId: TranslationId };
+
+export interface NoteView {
+  id: Uuid;
+  anchor: NoteAnchor;
+  body: string;
+  revision: number;
+  updatedAt: IsoInstant;
+  deleted: boolean;
+}
+
+export interface SoloPosition {
+  translationId: TranslationId;
+  bookId: BookId;
+  chapter: number;
+  verse: number;
+}
+
+export interface SoloPositionView extends SoloPosition {
+  revision: number;
+}
+
+// `baseRevision` is the revision the device last saw: null for a note it created.
+export type SyncOp =
+  | { opId: Uuid; entity: 'note'; entityId: Uuid; baseRevision: number | null; op: 'upsert'; anchor: NoteAnchor; body: string; deviceId: string }
+  | { opId: Uuid; entity: 'note'; entityId: Uuid; baseRevision: number; op: 'delete'; deviceId: string }
+  | { opId: Uuid; entity: 'solo_position'; baseRevision: number | null; op: 'set'; position: SoloPosition };
+
+export interface PushResult {
+  opId: Uuid;
+  outcome: 'applied' | 'already_applied' | 'conflict';
+  revision: number;
+  conflictId?: Uuid;
+}
+
+export interface NoteConflictView {
+  id: Uuid;
+  noteId: Uuid;
+  serverBody: string;
+  incomingBody: string;
+}
+
+export interface PullResponse {
+  notes: NoteView[];
+  soloPosition: SoloPositionView | null;
+  conflicts: NoteConflictView[];
+  cursor: string;
 }
 
 // The realtime channel (/ws). The snapshot carries the questions the study keeps in view (as WrapUpView.openQuestions); S6

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { after, before, beforeEach, describe, test } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import { chromium } from 'playwright';
 import type { Browser, Page } from 'playwright';
 import { createAoLabSource } from '../../src/server/content/aolab.ts';
@@ -37,11 +37,29 @@ after(async () => {
 });
 
 beforeEach(async () => {
+  // Each test starts at Romans 1 with no notes, not where the one before it left the reader.
+  await h.db.query('DELETE FROM sync_operations; DELETE FROM note_conflicts; DELETE FROM notes; DELETE FROM solo_positions');
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.addCookies([{ name: 'bs_session', value: cookie, url: baseUrl }]);
   page = await context.newPage();
   await page.goto(baseUrl);
 });
+// A page left open would keep saving its own position into the next test.
+afterEach(async () => {
+  await page?.context().close();
+});
+
+async function eventually<T>(read: () => Promise<T>, expected: T): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    try {
+      assert.deepEqual(await read(), expected);
+      return;
+    } catch {
+      await page.waitForTimeout(100);
+    }
+  }
+  assert.deepEqual(await read(), expected);
+}
 
 const reference = () => page.getByTestId('reference');
 async function expectReference(text: string): Promise<void> {
@@ -132,5 +150,66 @@ describe('the reader', () => {
     assert.equal(await page.locator('.verse').count(), 0);
     await page.getByLabel('Translation').selectOption('BSB');
     await expectReference('Romans 1');
+  });
+});
+
+describe('reading alone (S12)', () => {
+  test('S12.1 a reader in no group writes, edits and deletes a private note on Romans 4:3', async () => {
+    await expectReference('Romans 1');
+    await jump('Romans 4:3');
+    await expectReference('Romans 4:3');
+    await page.getByLabel('Note on Romans 4:3').fill('Credited, not earned.');
+    await page.getByRole('button', { name: 'Save note' }).click();
+    const note = page.locator('[data-note]');
+    await note.getByText('Credited, not earned.').waitFor();
+    assert.equal(await note.locator('.note-reference').textContent(), 'Romans 4:3');
+    assert.equal(await page.getByLabel('Note on Romans 4:3').inputValue(), '');
+
+    // Straight back, before the reader has stayed put long enough to save its place.
+    await page.reload();
+    await jump('Romans 4');
+    await note.getByText('Credited, not earned.').waitFor();
+    await note.getByRole('button', { name: 'Edit' }).click();
+    await page.getByLabel('Edit note on Romans 4:3').fill('Counted as righteousness.');
+    await note.getByRole('button', { name: 'Save', exact: true }).click();
+    await note.getByText('Counted as righteousness.').waitFor();
+    await eventually(async () => (await h.db.query('SELECT body, revision FROM notes WHERE deleted_at IS NULL')).rows, [{ body: 'Counted as righteousness.', revision: 2 }]);
+
+    await note.getByRole('button', { name: 'Delete' }).click();
+    await note.waitFor({ state: 'detached' });
+    await page.reload();
+    await page.getByRole('heading', { name: 'My notes' }).waitFor();
+    assert.equal(await note.count(), 0);
+  });
+
+  test('an edit that meets a newer version from another device closes, shows the newer text, and keeps the edit to copy', async () => {
+    await expectReference('Romans 1');
+    await jump('Romans 4:3');
+    await expectReference('Romans 4:3');
+    await page.getByLabel('Note on Romans 4:3').fill('First thought.');
+    await page.getByRole('button', { name: 'Save note' }).click();
+    const note = page.locator('[data-note]');
+    await note.getByText('First thought.').waitFor();
+
+    await note.getByRole('button', { name: 'Edit' }).click();
+    // Another device saves first.
+    await h.db.query(`UPDATE notes SET body = 'Changed on the phone.', revision = revision + 1`);
+    await page.getByLabel('Edit note on Romans 4:3').fill('My laptop edit.');
+    await note.getByRole('button', { name: 'Save', exact: true }).click();
+    await note.locator('[data-unsaved]').getByText('My laptop edit.').waitFor();
+    await note.getByText('Changed on the phone.').waitFor();
+    assert.equal(await page.getByLabel('Edit note on Romans 4:3').count(), 0);
+    const rows = await h.db.query('SELECT n.body, c.incoming_body FROM notes n JOIN note_conflicts c ON c.note_id = n.id');
+    assert.deepEqual(rows.rows, [{ body: 'Changed on the phone.', incoming_body: 'My laptop edit.' }]);
+  });
+
+  test('S12.2 the reader comes back to where they stopped reading alone', async () => {
+    await expectReference('Romans 1');
+    await jump('Romans 4:17');
+    await expectReference('Romans 4:17');
+    await eventually(async () => (await h.db.query('SELECT book_id, chapter, verse FROM solo_positions')).rows, [{ book_id: 'ROM', chapter: 4, verse: 17 }]);
+
+    await page.reload();
+    await expectReference('Romans 4:17');
   });
 });

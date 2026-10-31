@@ -207,7 +207,7 @@ Acceptance:
 Out of scope: push notifications (non-goal).
 
 ## S12 — Study alone with private notes
-Status: todo
+Status: done
 Delivers: A member can read and listen on their own, with their own place kept separately from the group's. They can write private notes on verses, display a different translation for themselves only, and hand chosen notes to the study assistant.
 Touches: personal (notes, solo position, `pushOps`, `pull`), identity (`displayTranslationId`), assistant (`noteIds` in context), client solo mode
 Depends on: S3, S6

@@ -453,11 +453,13 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 
 **personal**
 - Conflicts are a result, not an error: `outcome: 'conflict'`.
-- `payload_too_large` (413): more than 200 ops or a note over 64 KB. Retry: split.
+- `payload_too_large` (413): more than 200 ops, a note over 64 KB, or a request body over 16 MB. Retry: split.
+- `invalid_request` (400): a malformed push (the whole push is refused, nothing applied), or a `cursor` that is not one a pull returned. Retry: no.
 
 **assistant**
 - `assistant_not_permitted` (403): the caller is not the assistant owner. Retry: no.
 - `assistant_offline` (503): no connector link. Retry: no. The turn is not created.
+- `invalid_request` (400): a `noteIds` entry that is not one of the caller's own live notes, the same id twice, or more than 20. Retry: no. The turn is not created.
 - `turn_in_progress` (409): another turn is streaming or uncertain. Retry: no.
 
 **any module**

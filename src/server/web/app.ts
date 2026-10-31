@@ -21,6 +21,7 @@ import { registerQuestionRoutes } from './question-routes.ts';
 import { registerReminderRoutes } from './reminder-routes.ts';
 import { registerScheduleRoutes } from './schedule-routes.ts';
 import { registerStudyRoutes } from './study-routes.ts';
+import { registerSyncRoutes } from './sync-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
 import type { RealtimeHub } from '../study/realtime.ts';
@@ -93,6 +94,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return reply.status(error.status).send(error.toBody());
     }
     const fastifyError = error as { statusCode?: number; message?: string; code?: string };
+    if (fastifyError.statusCode === 413) {
+      return reply.status(413).send({ error: 'payload_too_large', message: 'The request is too large.', retryable: false });
+    }
     if (fastifyError.statusCode && fastifyError.statusCode >= 400 && fastifyError.statusCode < 500) {
       return reply.status(400).send({ error: 'invalid_request', message: fastifyError.message ?? 'Bad request.', retryable: false });
     }
@@ -120,6 +124,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerScheduleRoutes(app, deps);
   registerReminderRoutes(app, deps);
   registerAssistantRoutes(app, deps, hub);
+  registerSyncRoutes(app, deps);
 
   const staticRoot = resolve(config.staticDir);
   const hasClient = existsSync(resolve(staticRoot, 'index.html'));
