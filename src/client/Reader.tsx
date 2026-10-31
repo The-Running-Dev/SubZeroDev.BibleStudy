@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { ChapterView, NoteView, PassageRef, SoloPosition, SyncOp, TranslationId, TranslationView } from '../shared/api.ts';
+import type { ChapterView, PassageRef, SoloPosition, SyncOp, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { ApiFailure, api, messageFor } from './api.ts';
@@ -10,6 +10,8 @@ import { reportFums } from './fums.ts';
 import { Notes, inChapter } from './Notes.tsx';
 import { offlineChapter } from './offline.ts';
 import type { OfflineChapter } from './offline.ts';
+import { localPersonal, savePosition as storePosition, sync } from './outbox.ts';
+import type { Personal } from './outbox.ts';
 import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
 import { ReaderQuestions } from './Questions.tsx';
@@ -23,7 +25,7 @@ const unreachable = (error: unknown) => error instanceof TypeError || (error ins
 const start: PassageRef = { bookId: 'ROM', chapter: 1, startVerse: null, endVerse: null };
 // The solo position is saved once the reader has stayed put this long.
 const positionDelayMs = 2_000;
-// A failed first pull is tried again this often; the reader can move meanwhile.
+// A failed sync is tried again this often; the reader can move meanwhile.
 const pullRetryMs = 5_000;
 
 const positionKey = (p: SoloPosition) => `${p.translationId} ${p.bookId} ${p.chapter}:${p.verse}`;
@@ -39,37 +41,80 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
   const [playing, setPlaying] = useState<number | null>(null);
-  const [notes, setNotes] = useState<NoteView[]>([]);
+  const [personal, setPersonal] = useState<Personal>({ notes: [], soloPosition: null, conflicts: [] });
+  const notes = personal.notes;
   // Whether the saved position has come back; until then nothing is saved, so ROM 1 never overwrites it.
   const [restored, setRestored] = useState(false);
   const moved = useRef(false);
   const savedPosition = useRef<string | null>(null);
   // The place still waiting out the delay, saved at once if the reader leaves first.
   const pendingPosition = useRef<SoloPosition | null>(null);
+  // The next try at sending what the device holds, while the server cannot be reached.
+  const sendLater = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mounted = useRef(true);
 
-  function load(restore: boolean) {
-    return api.pull(null).then((personal) => {
-      setNotes(personal.notes);
-      const p = personal.soloPosition;
-      // A reader who already moved keeps their place.
-      if (restore && p && !moved.current) {
-        savedPosition.current = positionKey(p);
-        setTranslationId(p.translationId);
-        setAt({ bookId: p.bookId, chapter: p.chapter, startVerse: p.verse > 1 ? p.verse : null, endVerse: null });
-      }
+  function restoreFrom(p: SoloPosition | null) {
+    // A reader who already moved keeps their place.
+    if (!p || moved.current) return;
+    savedPosition.current = positionKey(p);
+    setTranslationId(p.translationId);
+    setAt({ bookId: p.bookId, chapter: p.chapter, startVerse: p.verse > 1 ? p.verse : null, endVerse: null });
+  }
+
+  // Sends what the device is waiting to send and takes what changed (S15). With no server, the device's own copy is
+  // shown and the call rejects; `restored` then means the device had a saved place.
+  function load(restore: boolean): Promise<void> {
+    return sync(props.userId).then(
+      (synced) => {
+        setPersonal(synced);
+        if (restore) restoreFrom(synced.soloPosition);
+      },
+      async (failure: unknown) => {
+        const local = await localPersonal(props.userId).catch(() => null);
+        if (local) {
+          setPersonal(local);
+          if (restore && local.soloPosition) {
+            restoreFrom(local.soloPosition);
+            setRestored(true);
+          }
+        }
+        throw failure;
+      },
+    );
+  }
+
+  // Sends what was saved on the device, and tries again every so often until the server answers.
+  function send() {
+    clearTimeout(sendLater.current);
+    void load(false).catch(() => {
+      if (mounted.current) sendLater.current = setTimeout(send, pullRetryMs);
     });
+  }
+
+  // A save on the device shows at once; sending it follows.
+  function changed() {
+    void localPersonal(props.userId)
+      .then((local) => mounted.current && setPersonal(local))
+      .catch(() => undefined);
+    send();
   }
 
   function savePosition(position: SoloPosition, keepalive = false) {
     pendingPosition.current = null;
-    const op: SyncOp = { opId: crypto.randomUUID(), entity: 'solo_position', op: 'set', baseRevision: null, position };
-    return api.push([op], keepalive).then(
-      () => (savedPosition.current = positionKey(position)),
-      () => undefined,
-    );
+    if (keepalive) {
+      // The page is closing: IndexedDB may not finish in time, so the position also goes straight out.
+      const op: SyncOp = { opId: crypto.randomUUID(), entity: 'solo_position', op: 'set', baseRevision: null, position };
+      void api.push([op], true).catch(() => undefined);
+    }
+    return storePosition(props.userId, position).then((state) => {
+      if (state === 'save_failed') return;
+      savedPosition.current = positionKey(position);
+      if (!keepalive) send();
+    });
   }
 
   useEffect(() => {
+    mounted.current = true;
     let current = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const attempt = () =>
@@ -80,9 +125,15 @@ export function Reader(props: { groupId: string | null; userId: string }) {
         },
       );
     void attempt();
+    // Back online: send what was saved meanwhile.
+    const online = () => send();
+    window.addEventListener('online', online);
     return () => {
       current = false;
+      mounted.current = false;
       clearTimeout(retry);
+      clearTimeout(sendLater.current);
+      window.removeEventListener('online', online);
     };
     // Once per page; `load` reads refs and setters only.
   }, []);
@@ -258,12 +309,14 @@ export function Reader(props: { groupId: string | null; userId: string }) {
 
       <Notes
         anchor={{ translationId, bookId: at.bookId, chapter: at.chapter, startVerse: at.startVerse, endVerse: at.startVerse === null ? null : (at.endVerse ?? at.startVerse) }}
+        userId={props.userId}
         notes={notes}
-        onSaved={(note) => setNotes((all) => [...all.filter((n) => n.id !== note.id), note])}
-        onReload={() => void load(false).catch(() => undefined)}
+        conflicts={personal.conflicts}
+        onChanged={changed}
       />
 
-      <AssistantPanel translationId={translationId} at={at} notes={inChapter(notes, at)} />
+      {/* Only notes the server has can go with a question. */}
+      <AssistantPanel translationId={translationId} at={at} notes={inChapter(notes, at).filter((n) => n.revision > 0)} />
     </>
   );
 }

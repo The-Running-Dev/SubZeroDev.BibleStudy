@@ -303,7 +303,8 @@ type SyncOp =
 function pushOps(ops: SyncOp[]): Promise<{ results: { opId: Uuid; outcome: 'applied' | 'already_applied' | 'conflict'; revision: number; conflictId?: Uuid }[] }>;
 // GET /api/sync/pull?cursor=
 function pull(cursor: string | null): Promise<{ notes: NoteView[]; soloPosition: { translationId: TranslationId; bookId: BookId; chapter: number; verse: number; revision: number } | null; conflicts: { id: Uuid; noteId: Uuid; serverBody: string; incomingBody: string }[]; cursor: string }>;
-// POST /api/sync/conflicts/:id
+// POST /api/sync/conflicts/:id — the live notes the choice left, the conflicted note first. kept_incoming on a note
+// changed again since the conflict keeps both instead, so no saved text is lost.
 function resolveConflict(conflictId: Uuid, choice: 'kept_server' | 'kept_incoming' | 'kept_both'): Promise<NoteView[]>;
 // GET /api/export — the user's own profile, notes, solo position, questions and replies they authored, conversations
 function exportPersonal(): Promise<Blob>;
@@ -357,8 +358,14 @@ type DownloadState = { state: 'absent' } | { state: 'downloading'; doneBytes: nu
 
 function downloadChapter(userId: Uuid, ref: { translationId: TranslationId; bookId: BookId; chapter: number }, withNarration: boolean, signal: AbortSignal, onProgress?: (state: DownloadState) => void): Promise<DownloadState>;   // verifies length and sha256 before ready
 function removeDownload(userId: Uuid, ref: { translationId: TranslationId; bookId: BookId; chapter: number }): Promise<void>;   // never touches notes
+// outbox.ts: the note and its waiting op in one IndexedDB transaction; 'saved_on_device' only once it completes.
 function saveNote(userId: Uuid, note: { id: Uuid; anchor: NoteView['anchor']; body: string }): Promise<SaveState>;
-function saveDraftQuestion(userId: Uuid, draft: { id: Uuid; anchor: QuestionView['anchor']; body: string }): Promise<SaveState>;
+function deleteNote(userId: Uuid, noteId: Uuid): Promise<SaveState>;
+function savePosition(userId: Uuid, position: SoloPosition): Promise<SaveState>;
+function sync(userId: Uuid): Promise<{ notes: (NoteView & { pending: boolean })[]; soloPosition: SoloPosition | null; conflicts: NoteConflictView[] }>;   // push then pull, one at a time per member across tabs
+// drafts.ts: a question draft per member, group and chapter, with the clientOpId its post will use (a new one with every
+// edit). Resolves once stored. Never sent on its own.
+function saveDraft(draft: { userId: Uuid; id: string; groupId: Uuid; verses: string; body: string; clientOpId: Uuid }): Promise<void>;
 function switchAccount(nextUserId: Uuid | null): Promise<void>;   // broadcasts to every window
 function requestUpdate(): Promise<{ applied: true } | { applied: false; reason: 'live_session' | 'signing_in' | 'multiple_windows' }>;
 ```
@@ -456,6 +463,8 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - Conflicts are a result, not an error: `outcome: 'conflict'`.
 - `payload_too_large` (413): more than 200 ops, a note over 64 KB, or a request body over 16 MB. Retry: split.
 - `invalid_request` (400): a malformed push (the whole push is refused, nothing applied), or a `cursor` that is not one a pull returned. Retry: no.
+- `conflict_resolved` (409): the conflict was already resolved, from another device or tab. Retry: no. Reload the notes.
+- `not_found` (404): no such conflict for this member.
 
 **assistant**
 - `assistant_not_permitted` (403): the caller is not the assistant owner. Retry: no.

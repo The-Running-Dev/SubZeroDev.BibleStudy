@@ -3,6 +3,8 @@ import type { FormEvent } from 'react';
 import type { QuestionStatus, QuestionView, ReplyView, TranslationId } from '../shared/api.ts';
 import { formatReference } from '../shared/reference.ts';
 import { ApiFailure, api, messageFor } from './api.ts';
+import { draftId, loadDraft, removeDraft, saveDraft } from './drafts.ts';
+import { useOnline } from './online.ts';
 import { parseVerses, unsettled } from './questions.ts';
 
 export interface ChapterAt {
@@ -78,30 +80,77 @@ export function ReaderQuestions(props: { groupId: string; userId: string; at: Ch
       </div>
       {error && <p role="alert">{error}</p>}
       {questions && <QuestionList groupId={groupId} userId={props.userId} questions={questions} onChanged={reload} empty="No questions here yet." />}
-      <AskForm groupId={groupId} at={at} verseCount={props.verseCount} verse={props.verse} onPosted={reload} />
+      <AskForm groupId={groupId} userId={props.userId} at={at} verseCount={props.verseCount} verse={props.verse} onPosted={reload} />
     </section>
   );
 }
 
-// Posting a question on a verse, a range, or the whole chapter.
-export function AskForm(props: { groupId: string; at: ChapterAt; verseCount?: number; verse: number | null; onPosted: (question: QuestionView) => void }) {
+// Posting a question on a verse, a range, or the whole chapter. What is typed is kept on the device as a draft until
+// it is posted (S15.5); posting needs a connection and a tap, and reuses the draft's op id so it posts once.
+export function AskForm(props: { groupId: string; userId: string; at: ChapterAt; verseCount?: number; verse: number | null; onPosted: (question: QuestionView) => void }) {
   // The chapter the question is on, fixed when the form opens: the reading may move on while it is written.
   const [opened, setOpened] = useState<{ at: ChapterAt; verseCount?: number } | null>(null);
   const [verses, setVerses] = useState('');
   const [text, setText] = useState('');
+  const [stored, setStored] = useState<'saved_on_device' | 'save_failed' | null>(null);
+  // The op id this text will be posted under; a new one with every edit (S15.5).
+  const [opId, setOpId] = useState<string>(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const opId = useOpId();
+  const online = useOnline();
+  const { groupId, userId } = props;
+  const { translationId, bookId, chapter } = props.at;
+
+  // A draft left on this chapter opens the form with it.
+  useEffect(() => {
+    if (opened) return;
+    let current = true;
+    loadDraft(userId, draftId(groupId, { bookId, chapter }))
+      .then((draft) => {
+        if (!current || !draft) return;
+        setVerses(draft.verses);
+        setText(draft.body);
+        setOpId(draft.clientOpId);
+        setStored('saved_on_device');
+        setOpened({ at: { translationId, bookId, chapter }, verseCount: props.verseCount });
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [opened, userId, groupId, translationId, bookId, chapter, props.verseCount]);
 
   function start() {
     setVerses(props.verse === null ? '' : String(props.verse));
+    setText('');
+    setOpId(crypto.randomUUID());
+    setStored(null);
     setError(null);
     setOpened({ at: props.at, verseCount: props.verseCount });
   }
 
+  async function keep(next: { verses: string; body: string }) {
+    if (!opened) return;
+    setVerses(next.verses);
+    setText(next.body);
+    const clientOpId = crypto.randomUUID();
+    setOpId(clientOpId);
+    try {
+      await saveDraft({ userId, id: draftId(groupId, opened.at), groupId, ...next, clientOpId });
+      setStored('saved_on_device');
+    } catch {
+      setStored('save_failed');
+    }
+  }
+
+  async function cancel() {
+    if (opened) await removeDraft(userId, draftId(groupId, opened.at)).catch(() => undefined);
+    setOpened(null);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!opened) return;
+    if (!opened || busy) return;
     const { at, verseCount } = opened;
     const range = parseVerses(verses);
     if (!range || (verseCount !== undefined && range.endVerse !== null && range.endVerse > verseCount)) {
@@ -109,16 +158,20 @@ export function AskForm(props: { groupId: string; at: ChapterAt; verseCount?: nu
       return;
     }
     const anchor = { ...at, ...range };
+    const id = draftId(groupId, at);
     setBusy(true);
     try {
-      const question = await api.postQuestion(props.groupId, { clientOpId: opId.idFor(JSON.stringify([anchor, text])), anchor, body: text });
-      opId.reset();
+      // A device with no room still posts; the draft is only a safety copy.
+      await saveDraft({ userId, id, groupId, verses, body: text, clientOpId: opId }).catch(() => undefined);
+      const question = await api.postQuestion(groupId, { clientOpId: opId, anchor, body: text });
+      await removeDraft(userId, id).catch(() => undefined);
       setText('');
+      setStored(null);
       setOpened(null);
       setError(null);
       props.onPosted(question);
     } catch (e) {
-      setError(messageFor(e));
+      setError(e instanceof TypeError ? 'Not posted: there is no connection. Your question is kept on this device.' : messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -135,15 +188,22 @@ export function AskForm(props: { groupId: string; at: ChapterAt; verseCount?: nu
     <form className="question-form" onSubmit={submit}>
       <label>
         Verses (blank for the whole chapter)
-        <input value={verses} onChange={(e) => setVerses(e.target.value)} inputMode="numeric" placeholder="e.g. 4 or 4-6" />
+        <input value={verses} onChange={(e) => void keep({ verses: e.target.value, body: text })} inputMode="numeric" placeholder="e.g. 4 or 4-6" />
       </label>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} aria-label="Your question" required maxLength={4000} />
+      <textarea value={text} onChange={(e) => void keep({ verses, body: e.target.value })} rows={3} aria-label="Your question" required maxLength={4000} />
+      {stored === 'saved_on_device' && (
+        <p className="note-state" data-save-state="not_posted">
+          Not posted · saved on this device
+        </p>
+      )}
+      {stored === 'save_failed' && <p className="note-state">Not posted · could not save on this device</p>}
+      {!online && <p className="note-state">Posting needs a connection.</p>}
       {error && <p role="alert">{error}</p>}
       <div className="question-actions">
-        <button type="submit" disabled={busy || !text.trim()}>
+        <button type="submit" disabled={busy || !online || !text.trim()}>
           Post question
         </button>
-        <button type="button" className="secondary" onClick={() => setOpened(null)}>
+        <button type="button" className="secondary" onClick={() => void cancel()}>
           Cancel
         </button>
       </div>

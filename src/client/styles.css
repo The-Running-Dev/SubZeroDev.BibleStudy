@@ -541,3 +541,26 @@ button:disabled {
   margin: 0;
   padding-left: 1.25rem;
 }
+
+/* S15: where a save stands, and a note changed on two devices. */
+.note-state {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.note-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #d97706;
+  border-radius: 0.5rem;
+}
+
+.note-conflict blockquote {
+  margin: 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid #9ca3af;
+  white-space: pre-wrap;
+}

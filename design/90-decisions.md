@@ -8,6 +8,21 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S15: saves land on the device first, one waiting op per note, and conflicts are chosen by the member
+- **Context:** S15 must say "Saved on this device" only once a save is stored, sync without duplicates when the connection returns, and keep both versions when two devices edit the same note (DOD-25, DOD-26).
+- **Chosen:**
+  - `outbox.ts` writes the note and its op in one IndexedDB transaction and reports `saved_on_device` only on `oncomplete`; a failed transaction (a full disk) reports `save_failed` and leaves the previous version as it was.
+  - Each note has at most one waiting op. A newer save replaces it under a new op id, and the op's base revision is the last one the server confirmed. An op is removed only once the server reported its outcome, so a lost answer sends the same op id again and gets `already_applied`.
+  - Sync is push then pull, single-flight per member and held under the Web Lock `outbox:<userId>` so two tabs never send at once; a call made during a run gets one more run after it. A pull never overwrites a note with a waiting op, and does not advance the cursor past one, so the server's version arrives once nothing waits on it. A save shows from the device at once; the reader then syncs on load, every 5 s while the server is unreachable, and on the browser's `online` event.
+  - Deleting a note the server has not acknowledged keeps a delete that carries the unacknowledged save: that save is sent again under its own op id (so a copy that already landed is `already_applied`), and the delete follows with the revision it returned. Dropping it locally instead would let a save already in flight bring the note back.
+  - A note over 64 KB is refused in the browser with the server's message, so it never becomes an op the server rejects on every push.
+  - A conflict shows both versions with Keep this version, Keep the other version, and Keep both; an edit of a note deleted on another device shows the member's version with Keep my version or Let it go. `kept_incoming` on a note changed again since the conflict becomes `kept_both`, so no saved text is lost; a second resolve answers 409 `conflict_resolved`.
+  - Question drafts are kept per member, group and chapter with the clientOpId their post will use, a new one with every edit, so a retried post is recognised and an edited one is not taken for it. They show "Not posted", are posted only by a tap while online, and are removed once posted. A device with no room for the draft still posts.
+  - Stopping-point confirmations and playback commands are refused while offline and never queued.
+  - Notes the server has never had are not attached to assistant questions.
+- **Rejected:** queueing every edit as its own op. Two edits of one note in one push would conflict with each other, and a long offline stretch would grow the queue without bound.
+- **Known edge:** a push whose answer is lost while the member edits the same note again can show a conflict between two of the member's own versions. Both are kept, and Keep both resolves it.
+
 ### 2026-10-31 — S14: downloads are verified against a server manifest and kept per member in IndexedDB and Cache Storage
 - **Context:** S14 lets a member read and hear a chapter with no connection after a full close, with the size shown first, and an interrupted download must never look ready (DOD-23, DOD-24).
 - **Chosen:**

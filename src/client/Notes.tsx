@@ -1,56 +1,55 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import type { FormEvent } from 'react';
-import type { NoteAnchor, NoteView, PushResult, SyncOp } from '../shared/api.ts';
+import type { NoteAnchor, NoteConflictView, NoteView } from '../shared/api.ts';
 import { formatReference } from '../shared/reference.ts';
-import { api, messageFor } from './api.ts';
-import { deviceId } from './device.ts';
+import { messageFor } from './api.ts';
+import type { ConflictChoice, LocalNote } from './outbox.ts';
+import { deleteNote, resolveConflict, saveNote } from './outbox.ts';
 
-// The reader's own notes on the chapter on screen. Only their author ever receives them (I-21). Offline saving and
-// settling conflicts come later (S15): a save that meets a newer version from another device reloads it, closes the
-// edit, and keeps the unsaved text in view to copy.
+// The reader's own notes on the chapter on screen. Only their author ever receives them (I-21). A save lands on the
+// device first and is sent when the server answers (S15); a note edited on two devices from the same version shows
+// both versions until the reader chooses.
 
-export const inChapter = (notes: NoteView[], at: { bookId: string; chapter: number }) =>
+export const inChapter = <T extends NoteView>(notes: T[], at: { bookId: string; chapter: number }) =>
   notes.filter((n) => !n.deleted && n.anchor.bookId === at.bookId && n.anchor.chapter === at.chapter);
 
 const byVerse = (a: NoteView, b: NoteView) => (a.anchor.startVerse ?? 0) - (b.anchor.startVerse ?? 0) || a.updatedAt.localeCompare(b.updatedAt);
 
-type NoteUpsert = Extract<SyncOp, { op: 'upsert' }>;
-type Saved = 'saved' | 'conflict' | 'failed';
+const saveFailed = 'Save failed: this device has no room to store it. Your text is still in the box; the saved version is unchanged.';
+// The server's limit on one note (contract: payload_too_large).
+const maxNoteBytes = 64 * 1024;
+const tooLarge = 'A note is at most 64 KB. Split it into smaller notes.';
+const fits = (body: string) => new TextEncoder().encode(body).length <= maxNoteBytes;
 
-const sameAnchor = (a: NoteAnchor, b: NoteAnchor) =>
-  a.translationId === b.translationId && a.bookId === b.bookId && a.chapter === b.chapter && a.startVerse === b.startVerse && a.endVerse === b.endVerse;
-
-async function pushOne(op: SyncOp): Promise<PushResult> {
-  const { results } = await api.push([op]);
-  return results[0];
-}
-
-export function Notes(props: { anchor: NoteAnchor; notes: NoteView[]; onSaved: (note: NoteView) => void; onReload: () => void }) {
+export function Notes(props: {
+  userId: string;
+  anchor: NoteAnchor;
+  notes: LocalNote[];
+  conflicts: NoteConflictView[];
+  // The device's copy changed; the reader reloads it and sends what is waiting.
+  onChanged: () => void;
+}) {
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // An edit that met a newer version, shown under the note until dismissed.
-  const [unsaved, setUnsaved] = useState<{ id: string; body: string } | null>(null);
-  // The new note being saved: a retry of the same text sends the same operation, so a lost response never doubles it.
-  const pendingAdd = useRef<NoteUpsert | null>(null);
+  // The new note's id, kept until it is stored, so saving the same text again never makes two.
+  const [newId, setNewId] = useState(() => crypto.randomUUID());
   const shown = inChapter(props.notes, props.anchor).sort(byVerse);
+  // A conflict whose note is gone from this device: the note was deleted on another device while this one edited it.
+  const live = new Set(props.notes.filter((n) => !n.deleted).map((n) => n.id));
+  const orphans = props.conflicts.filter((c) => !live.has(c.noteId));
 
-  async function save(op: SyncOp, saved: (revision: number) => NoteView, conflict: string): Promise<Saved> {
+  async function stored(save: () => Promise<string>): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
-      const result = await pushOne(op);
-      if (result.outcome === 'conflict') {
-        setError(conflict);
-        props.onReload();
-        return 'conflict';
+      if ((await save()) === 'save_failed') {
+        setError(saveFailed);
+        return false;
       }
-      props.onSaved(saved(result.revision));
-      return 'saved';
-    } catch (failure) {
-      setError(messageFor(failure));
-      return 'failed';
+      props.onChanged();
+      return true;
     } finally {
       setBusy(false);
     }
@@ -60,16 +59,9 @@ export function Notes(props: { anchor: NoteAnchor; notes: NoteView[]; onSaved: (
     event.preventDefault();
     const body = draft.trim();
     if (!body || busy) return;
-    const anchor = props.anchor;
-    const prior = pendingAdd.current;
-    const op: NoteUpsert =
-      prior && prior.body === body && sameAnchor(prior.anchor, anchor)
-        ? prior
-        : { opId: crypto.randomUUID(), entity: 'note', entityId: crypto.randomUUID(), op: 'upsert', baseRevision: null, anchor, body, deviceId: deviceId() };
-    pendingAdd.current = op;
-    const saved = (revision: number): NoteView => ({ id: op.entityId, anchor, body, revision, updatedAt: new Date().toISOString(), deleted: false });
-    if ((await save(op, saved, 'That note could not be saved. Try again.')) !== 'saved') return;
-    pendingAdd.current = null;
+    if (!fits(body)) return setError(tooLarge);
+    if (!(await stored(() => saveNote(props.userId, { id: newId, anchor: props.anchor, body })))) return;
+    setNewId(crypto.randomUUID());
     setDraft('');
   }
 
@@ -78,63 +70,105 @@ export function Notes(props: { anchor: NoteAnchor; notes: NoteView[]; onSaved: (
     if (!editing || busy) return;
     const body = editing.body.trim();
     if (!body) return;
-    const op: SyncOp = { opId: crypto.randomUUID(), entity: 'note', entityId: note.id, op: 'upsert', baseRevision: note.revision, anchor: note.anchor, body, deviceId: deviceId() };
-    const saved = (revision: number): NoteView => ({ ...note, body, revision, updatedAt: new Date().toISOString() });
-    const conflict = 'This note changed on another device. Its newer text is shown, with your edit under it to copy.';
-    const outcome = await save(op, saved, conflict);
-    if (outcome === 'failed') return;
-    // A second Save must not go out on the old revision, so the form closes either way.
-    setEditing(null);
-    setUnsaved(outcome === 'conflict' ? { id: note.id, body } : null);
+    if (!fits(body)) return setError(tooLarge);
+    if (await stored(() => saveNote(props.userId, { id: note.id, anchor: note.anchor, body }))) setEditing(null);
   }
 
   async function remove(note: NoteView) {
     if (busy) return;
-    const op: SyncOp = { opId: crypto.randomUUID(), entity: 'note', entityId: note.id, op: 'delete', baseRevision: note.revision, deviceId: deviceId() };
-    const saved = (revision: number): NoteView => ({ ...note, body: '', revision, updatedAt: new Date().toISOString(), deleted: true });
-    await save(op, saved, 'This note changed on another device, so it was kept. Its newer text is shown.');
+    await stored(() => deleteNote(props.userId, note.id));
+  }
+
+  async function choose(conflict: NoteConflictView, choice: ConflictChoice) {
+    setBusy(true);
+    setError(null);
+    try {
+      await resolveConflict(props.userId, conflict.id, choice);
+      props.onChanged();
+    } catch (failure) {
+      setError(failure instanceof TypeError ? 'Choosing a version needs a connection.' : messageFor(failure));
+      if (!(failure instanceof TypeError)) props.onChanged();
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <section className="notes" aria-label="My notes">
       <h2>My notes</h2>
+      {orphans.map((conflict) => (
+        <div key={conflict.id} className="note-conflict" role="group" aria-label="A note deleted on another device">
+          <p>This note was deleted on another device while you changed it here. Keep your version?</p>
+          <blockquote className="note-body" data-version="other">
+            {conflict.incomingBody}
+          </blockquote>
+          <button type="button" disabled={busy} onClick={() => choose(conflict, 'kept_incoming')}>
+            Keep my version
+          </button>
+          <button type="button" className="secondary" disabled={busy} onClick={() => choose(conflict, 'kept_server')}>
+            Let it go
+          </button>
+        </div>
+      ))}
       {shown.length > 0 && (
         <ul className="notes-list">
-          {shown.map((note) => (
-            <li key={note.id} data-note={note.id}>
-              <p className="note-reference">{formatReference(note.anchor)}</p>
-              {editing?.id === note.id ? (
-                <form onSubmit={(e) => update(e, note)}>
-                  <textarea value={editing.body} onChange={(e) => setEditing({ id: note.id, body: e.target.value })} aria-label={`Edit note on ${formatReference(note.anchor)}`} />
-                  <button type="submit" disabled={busy || !editing.body.trim()}>
-                    Save
-                  </button>
-                  <button type="button" className="secondary" onClick={() => setEditing(null)}>
-                    Cancel
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <p className="note-body">{note.body}</p>
-                  <button type="button" className="secondary" onClick={() => setEditing({ id: note.id, body: note.body })}>
-                    Edit
-                  </button>
-                  <button type="button" className="secondary" disabled={busy} onClick={() => remove(note)}>
-                    Delete
-                  </button>
-                  {unsaved?.id === note.id && (
-                    <div className="note-unsaved" data-unsaved>
-                      <p>Your edit, not saved:</p>
-                      <p className="note-body">{unsaved.body}</p>
-                      <button type="button" className="secondary" onClick={() => setUnsaved(null)}>
-                        Dismiss
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </li>
-          ))}
+          {shown.map((note) => {
+            const conflict = props.conflicts.find((c) => c.noteId === note.id);
+            return (
+              <li key={note.id} data-note={note.id}>
+                <p className="note-reference">{formatReference(note.anchor)}</p>
+                {conflict ? (
+                  <div className="note-conflict" role="group" aria-label="Two versions of this note">
+                    <p>This note was changed on two devices. Choose what to keep.</p>
+                    <blockquote className="note-body" data-version="saved">
+                      {conflict.serverBody}
+                    </blockquote>
+                    <button type="button" className="secondary" disabled={busy} onClick={() => choose(conflict, 'kept_server')}>
+                      Keep this version
+                    </button>
+                    <blockquote className="note-body" data-version="other">
+                      {conflict.incomingBody}
+                    </blockquote>
+                    <button type="button" className="secondary" disabled={busy} onClick={() => choose(conflict, 'kept_incoming')}>
+                      Keep the other version
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => choose(conflict, 'kept_both')}>
+                      Keep both
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="note-body">{note.body}</p>
+                    {note.pending && (
+                      <p className="note-state" data-save-state="saved_on_device">
+                        Saved on this device
+                      </p>
+                    )}
+                    {editing?.id === note.id ? (
+                      <form onSubmit={(e) => update(e, note)}>
+                        <textarea value={editing.body} onChange={(e) => setEditing({ id: note.id, body: e.target.value })} aria-label={`Edit note on ${formatReference(note.anchor)}`} />
+                        <button type="submit" disabled={busy || !editing.body.trim()}>
+                          Save
+                        </button>
+                        <button type="button" className="secondary" onClick={() => setEditing(null)}>
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <button type="button" className="secondary" onClick={() => setEditing({ id: note.id, body: note.body })}>
+                          Edit
+                        </button>
+                        <button type="button" className="secondary" disabled={busy} onClick={() => remove(note)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       <form className="note-new" onSubmit={add}>

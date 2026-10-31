@@ -23,6 +23,7 @@ import type {
   PostQuestionRequest,
   PostReplyRequest,
   Profile,
+  NoteView,
   ProfilePatch,
   PullResponse,
   PushResult,
@@ -132,6 +133,9 @@ export const api = {
   push: (ops: SyncOp[], keepalive = false) => call<{ results: PushResult[] }>('POST', '/api/sync/push', { ops }, keepalive),
   // The caller's own notes changed after `cursor` (every live one without it), solo position and open conflicts.
   pull: (cursor: string | null) => call<PullResponse>('GET', cursor === null ? '/api/sync/pull' : `/api/sync/pull?cursor=${encodeURIComponent(cursor)}`),
+  // The notes a conflict choice left; 409 `conflict_resolved` when it was settled already.
+  resolveConflict: (conflictId: string, choice: 'kept_server' | 'kept_incoming' | 'kept_both') =>
+    call<NoteView[]>('POST', `/api/sync/conflicts/${conflictId}`, { choice }),
 };
 
 function postUrl(groupId: string, target: { questionId: string } | { replyId: string }): string {

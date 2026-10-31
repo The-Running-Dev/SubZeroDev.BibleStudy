@@ -182,7 +182,7 @@ describe('reading alone (S12)', () => {
     assert.equal(await note.count(), 0);
   });
 
-  test('an edit that meets a newer version from another device closes, shows the newer text, and keeps the edit to copy', async () => {
+  test('S15.4 an edit that meets a newer version from another device offers both, and keeping both leaves two notes', async () => {
     await expectReference('Romans 1');
     await jump('Romans 4:3');
     await expectReference('Romans 4:3');
@@ -190,17 +190,25 @@ describe('reading alone (S12)', () => {
     await page.getByRole('button', { name: 'Save note' }).click();
     const note = page.locator('[data-note]');
     await note.getByText('First thought.').waitFor();
+    await eventually(async () => (await h.db.query('SELECT body FROM notes')).rows, [{ body: 'First thought.' }]);
 
     await note.getByRole('button', { name: 'Edit' }).click();
     // Another device saves first.
     await h.db.query(`UPDATE notes SET body = 'Changed on the phone.', revision = revision + 1`);
     await page.getByLabel('Edit note on Romans 4:3').fill('My laptop edit.');
     await note.getByRole('button', { name: 'Save', exact: true }).click();
-    await note.locator('[data-unsaved]').getByText('My laptop edit.').waitFor();
-    await note.getByText('Changed on the phone.').waitFor();
-    assert.equal(await page.getByLabel('Edit note on Romans 4:3').count(), 0);
+    const chooser = page.getByRole('group', { name: 'Two versions of this note' });
+    await chooser.locator('[data-version=saved]').getByText('Changed on the phone.').waitFor();
+    await chooser.locator('[data-version=other]').getByText('My laptop edit.').waitFor();
     const rows = await h.db.query('SELECT n.body, c.incoming_body FROM notes n JOIN note_conflicts c ON c.note_id = n.id');
     assert.deepEqual(rows.rows, [{ body: 'Changed on the phone.', incoming_body: 'My laptop edit.' }]);
+
+    await chooser.getByRole('button', { name: 'Keep both' }).click();
+    await chooser.waitFor({ state: 'detached' });
+    await note.getByText('My laptop edit.').waitFor();
+    assert.equal(await note.count(), 2);
+    const kept = await h.db.query('SELECT body FROM notes WHERE deleted_at IS NULL ORDER BY body');
+    assert.deepEqual(kept.rows, [{ body: 'Changed on the phone.' }, { body: 'My laptop edit.' }]);
   });
 
   test('S12.2 the reader comes back to where they stopped reading alone', async () => {

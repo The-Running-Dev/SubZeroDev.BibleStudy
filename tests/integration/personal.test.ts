@@ -257,3 +257,88 @@ describe('private notes (S12.3)', () => {
     assert.equal((await h.app.inject({ method: 'POST', url: '/api/sync/push', payload: { ops: [] } })).statusCode, 401);
   });
 });
+
+describe('offline sync (S15)', () => {
+  const resolve = (cookie: string, conflictId: string, choice: string) => inject('POST', cookie, `/api/sync/conflicts/${conflictId}`, { choice });
+
+  // A note at revision 3, then a second device's edit made on revision 3 after the first device moved it on.
+  async function conflicted(cookie: string): Promise<{ id: string; conflictId: string }> {
+    const id = randomUUID();
+    await push(cookie, [upsert(id, 'One.')]);
+    await push(cookie, [upsert(id, 'Two.', 1)]);
+    await push(cookie, [upsert(id, 'Three.', 2)]);
+    await push(cookie, [upsert(id, 'Phone.', 3)]);
+    const [stale] = await push(cookie, [upsert(id, 'Laptop.', 3)]);
+    assert.equal(stale.outcome, 'conflict');
+    return { id, conflictId: stale.conflictId as string };
+  }
+
+  test('S15.3 the same batch pushed twice applies once and leaves one note', async () => {
+    const { member } = await ownerAndMember();
+    const batch = [upsert(randomUUID(), 'Offline thought.'), moveTo(5, 2)];
+    assert.deepEqual((await push(member.cookie, batch)).map((r) => r.outcome), ['applied', 'applied']);
+    assert.deepEqual((await push(member.cookie, batch)).map((r) => r.outcome), ['already_applied', 'already_applied']);
+    const personal = await pull(member.cookie);
+    assert.deepEqual(personal.notes.map((n) => n.body), ['Offline thought.']);
+    assert.equal(personal.soloPosition?.chapter, 5);
+  });
+
+  test('S15.4 keeping both versions of a conflicted note leaves two notes on the passage and closes the conflict', async () => {
+    const { member } = await ownerAndMember();
+    const { id, conflictId } = await conflicted(member.cookie);
+    assert.deepEqual((await pull(member.cookie)).conflicts, [{ id: conflictId, noteId: id, serverBody: 'Phone.', incomingBody: 'Laptop.' }]);
+
+    const response = await resolve(member.cookie, conflictId, 'kept_both');
+    assert.equal(response.statusCode, 200, response.body);
+    const kept = response.json() as { id: string; body: string; anchor: NoteAnchor }[];
+    assert.deepEqual(kept.map((n) => n.body), ['Phone.', 'Laptop.']);
+    assert.equal(kept[0].id, id);
+    assert.notEqual(kept[1].id, id);
+    assert.deepEqual(kept[1].anchor, romans4(3));
+
+    const personal = await pull(member.cookie);
+    assert.deepEqual(personal.notes.map((n) => n.body).sort(), ['Laptop.', 'Phone.']);
+    assert.deepEqual(personal.conflicts, []);
+    const again = await resolve(member.cookie, conflictId, 'kept_both');
+    assert.equal(again.statusCode, 409);
+    assert.equal(again.json().error, 'conflict_resolved');
+    assert.equal((await pull(member.cookie)).notes.length, 2);
+  });
+
+  test('keeping the incoming version writes it over the note; keeping the server version changes nothing', async () => {
+    const { member } = await ownerAndMember();
+    const first = await conflicted(member.cookie);
+    const incoming = await resolve(member.cookie, first.conflictId, 'kept_incoming');
+    assert.equal(incoming.statusCode, 200, incoming.body);
+    assert.deepEqual(incoming.json().map((n: { id: string; body: string; revision: number }) => [n.id, n.body, n.revision]), [[first.id, 'Laptop.', 5]]);
+
+    const second = await conflicted(member.cookie);
+    const server = await resolve(member.cookie, second.conflictId, 'kept_server');
+    assert.deepEqual(server.json().map((n: { body: string; revision: number }) => [n.body, n.revision]), [['Phone.', 4]]);
+    const personal = await pull(member.cookie);
+    assert.deepEqual(personal.notes.map((n) => n.body).sort(), ['Laptop.', 'Phone.']);
+    assert.deepEqual(personal.conflicts, []);
+  });
+
+  test('keeping the incoming version of a note that changed again since keeps both, so no text is lost', async () => {
+    const { member } = await ownerAndMember();
+    const { id, conflictId } = await conflicted(member.cookie);
+    await push(member.cookie, [upsert(id, 'Phone, later.', 4)]);
+    const response = await resolve(member.cookie, conflictId, 'kept_incoming');
+    assert.deepEqual(response.json().map((n: { body: string }) => n.body), ['Phone, later.', 'Laptop.']);
+    const row = await h.db.query<{ resolution: string }>('SELECT resolution FROM note_conflicts WHERE id = $1', [conflictId]);
+    assert.deepEqual(row.rows, [{ resolution: 'kept_both' }]);
+  });
+
+  test("only the note's author can resolve its conflict; a bad choice is refused (I-21)", async () => {
+    const { owner, member } = await ownerAndMember();
+    const { conflictId } = await conflicted(member.cookie);
+    const theirs = await resolve(owner.cookie, conflictId, 'kept_incoming');
+    assert.equal(theirs.statusCode, 404);
+    assert.equal(theirs.json().error, 'not_found');
+    assert.equal((await resolve(member.cookie, 'not-a-uuid', 'kept_server')).statusCode, 404);
+    assert.equal((await resolve(member.cookie, conflictId, 'keep_mine')).statusCode, 400);
+    assert.equal((await h.app.inject({ method: 'POST', url: `/api/sync/conflicts/${conflictId}`, payload: { choice: 'kept_server' } })).statusCode, 401);
+    assert.equal((await pull(member.cookie)).conflicts.length, 1);
+  });
+});

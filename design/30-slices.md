@@ -252,9 +252,9 @@ Acceptance:
 Out of scope: offline note sync (S15).
 
 ## S15 — Save notes and drafts offline and sync them safely
-Status: todo
+Status: done
 Delivers: A member's notes, solo place and question drafts save on their phone even offline, show honestly whether they are saved, and sync when the connection returns without duplicates. If two devices disagree, both versions are kept for them to choose.
-Touches: offline (`saveNote`, `saveDraftQuestion`, save states), sync engine, personal (`pushOps`, `pull`, `resolveConflict`)
+Touches: offline (`saveNote`, `saveDraft`, save states), sync engine, personal (`pushOps`, `pull`, `resolveConflict`)
 Depends on: S12, S14
 Acceptance:
   - S15.1 A note saved offline shows "Saved on this device" only after the IndexedDB transaction completes. It survives a full close and offline restart.
