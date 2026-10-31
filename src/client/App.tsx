@@ -143,7 +143,7 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
           </button>
         </section>
       )}
-      {studying && group ? <Study groupId={group.id} /> : <Reader />}
+      {studying && group ? <Study groupId={group.id} userId={props.profile.id} /> : <Reader groupId={group?.id ?? null} userId={props.profile.id} />}
     </div>
   );
 }

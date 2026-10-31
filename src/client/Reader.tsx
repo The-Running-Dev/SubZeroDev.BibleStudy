@@ -7,12 +7,13 @@ import { api, messageFor } from './api.ts';
 import { AssistantPanel } from './Assistant.tsx';
 import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
+import { ReaderQuestions } from './Questions.tsx';
 
 type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView } | { kind: 'unavailable'; message: string };
 
 const start: PassageRef = { bookId: 'ROM', chapter: 1, startVerse: null, endVerse: null };
 
-export function Reader() {
+export function Reader(props: { groupId: string | null; userId: string }) {
   const [translations, setTranslations] = useState<TranslationView[]>([]);
   const [translationId, setTranslationId] = useState<TranslationId>('BSB');
   const [at, setAt] = useState<PassageRef>(start);
@@ -124,6 +125,10 @@ export function Reader() {
           {next ? `${bookById(next.bookId)!.name} ${next.chapter}` : 'Next'} ›
         </button>
       </nav>
+
+      {props.groupId && shown && (
+        <ReaderQuestions groupId={props.groupId} userId={props.userId} at={{ translationId, bookId: at.bookId, chapter: at.chapter }} verseCount={shown.verseCount} verse={playing ?? at.startVerse} />
+      )}
 
       <AssistantPanel translationId={translationId} at={at} />
     </>

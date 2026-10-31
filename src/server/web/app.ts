@@ -16,6 +16,7 @@ import { registerAssistantRoutes } from './assistant-routes.ts';
 import { registerContentRoutes } from './content-routes.ts';
 import { registerGroupRoutes } from './group-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
+import { registerQuestionRoutes } from './question-routes.ts';
 import { registerStudyRoutes } from './study-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
@@ -111,6 +112,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerContentRoutes(app, deps);
   registerGroupRoutes(app, deps, hub);
   registerStudyRoutes(app, deps, hub);
+  registerQuestionRoutes(app, deps, hub);
   registerAssistantRoutes(app, deps, hub);
 
   const staticRoot = resolve(config.staticDir);

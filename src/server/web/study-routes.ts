@@ -6,6 +6,7 @@ import { sessionIsValid } from '../identity/sessions.ts';
 import { AppError } from '../platform/errors.ts';
 import { isUuid } from '../platform/ids.ts';
 import { log } from '../platform/log.ts';
+import { questionsFor } from '../questions/questions.ts';
 import type { RealtimeHub } from '../study/realtime.ts';
 import type { StudyDeps } from '../study/sessions.ts';
 import { activeSession, applyCommand, driftReport, parseCommand, pauseForEmptyRoom, recordDrift, sessionForMember, startOrJoinSession } from '../study/sessions.ts';
@@ -187,8 +188,10 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
               // Join the room before reading the snapshot, so a change committed in between reaches this connection
               // as a broadcast instead of being lost.
               hub.join(connection, checked.sessionId);
-              const { state } = await sessionForMember(study, auth.userId, checked.sessionId);
-              return reply({ t: 'snapshot', state, presence: hub.presence(state.sessionId) });
+              const { groupId, state } = await sessionForMember(study, auth.userId, checked.sessionId);
+              // The open and carried questions on the session's chapter; each appears as the narration reaches its verse.
+              const questions = await questionsFor(deps.db, groupId, { bookId: state.passage.bookId, chapter: state.passage.chapter, status: ['open', 'carried'] });
+              return reply({ t: 'snapshot', state, presence: hub.presence(state.sessionId), questions });
             }
             case 'command': {
               if (!(await stillSignedIn())) return;

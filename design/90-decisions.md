@@ -8,6 +8,20 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S8: questions are revealed by the verse being read, and a reply does not make the asker's edit stale
+- **Context:** S8.3 needs a verse question to appear once the narration reaches it, without pausing and without appearing twice, and S8.4 needs an edit to fail on a post that changed since it was opened.
+- **Chosen:**
+  - The study client reveals a verse question once the playing verse is at or past its start verse, and keeps it revealed through seeks back. A chapter question, and one's own new question, show at once. Without verified verse timing there is nothing to pace by, so every question shows; narration still being prepared shows only chapter questions until its timing arrives. A new chapter starts the revealed set over.
+  - Questions reach the study as part of the snapshot (the session's chapter only) and as `question` messages to the group's active sessions; the client refetches on a chapter change and after its own edits and deletes.
+  - Each post has a `revision`; an edit names the one it saw and gets `stale_revision` with the current post otherwise. A reply does not bump its question's revision, so a member answering does not make the asker's pending edit stale. A stale edit keeps the author's draft so they can save it again over the latest.
+  - Each question also has a `version`, raised by every change to it or its replies under the question's row lock. The client keeps the higher version of any copy, from a broadcast or a refetch, so an out-of-order broadcast never shows an older reply list. S9's status changes must raise it too.
+  - Posting keeps one `clientOpId` per draft, so a retry after a dropped connection returns the first post. A deleted post keeps its row without a body (a tombstone), so a retry that arrives after the delete returns it deleted instead of posting it again; tombstones are not listed, and a removed question with no live replies takes no new ones.
+  - Every response is built in the transaction that made the change; the broadcast after commit only logs a failure, since the change itself succeeded.
+  - Delete asks for confirmation in the page rather than with `confirm()`, which mobile browsers and automated tests can suppress.
+  - The group stopping point is not touched by questions; S9 adds it and its acceptance re-checks S8.1's "unchanged".
+- **Rejected:** pausing the narration when a question appears. S8.3 rules it out; any member can pause to discuss (DOD-06).
+- **Rejected:** revealing by elapsed time instead of verse. Seeks and rate changes would show questions early or late.
+
 ### 2026-10-31 — S7: a one-shot migrate service, an in-stack backup service, and a drill in CI
 - **Context:** S7 needs a failed migration to leave the database untouched and the site recoverable, nightly backups the owner has seen restore, and a deploy that costs nothing beyond the VPS.
 - **Chosen:**
