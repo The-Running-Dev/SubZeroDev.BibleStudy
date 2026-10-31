@@ -4,17 +4,17 @@ What v1 does, how each requirement in [design/00-brief.md](../design/00-brief.md
 
 ## Test results
 
-From the CI run on {{CI_COMMIT}} ({{CI_URL}}):
+From the CI run on `1ba12c8` (S18, merged into main) ([run 41247294152](https://github.com/The-Running-Dev/SubZeroDev.BibleStudy/actions/runs/41247294152)):
 
 | Gate | Result |
 |---|---|
-| Typecheck (`tsc`) | {{TYPECHECK}} |
-| Lint (`eslint --max-warnings 0`) | {{LINT}} |
-| Docs check | {{DOCS}} |
-| Unit (`npm test`) | {{UNIT}} |
-| Integration against Postgres 17 and Mailpit | {{INTEG}} |
-| Browser (Playwright, Chromium at phone size) | {{E2E}} |
-| Stack drill (`npm run drill`) | {{DRILL}} |
+| Typecheck (`tsc`) | pass |
+| Lint (`eslint --max-warnings 0`) | pass, 0 warnings |
+| Docs check | 198 tracked files, 0 problems |
+| Unit (`npm test`) | 149 pass, 0 fail |
+| Integration against Postgres 17 and Mailpit | 175 pass, 0 fail |
+| Browser (Playwright, Chromium at phone size) | 77 pass, 0 fail |
+| Stack drill (`npm run drill`) | 9 of 9 checks pass: build id, healthy services, data surviving restart, backup, restore, refused and forced restore, failed migration and rollback |
 
 Run once on the owner's PC, not in CI:
 
