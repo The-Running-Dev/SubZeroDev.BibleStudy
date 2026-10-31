@@ -15,10 +15,12 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
   - Deliveries are inserted for every owed future reminder in the window, not only the ones about to be due, so a move or cancel shows up as suppressed rows.
   - A delivery stays `pending` with its `email_job_id` until the outbox reports `sent` or `failed`. Suppression withdraws a still-queued job in the same transaction and skips one the worker already claimed, which then finishes and is reconciled; the worker re-claims a job stuck in `sending` after 10 minutes, as for login codes.
   - D-2026-10-30-14 stands: a reminder more than 30 minutes past its send time is suppressed, not sent; exactly 30 minutes late is still sent.
-  - Planning a passage bumps the revision but moves nothing: a delivery already queued or sent for the same send time stands, so the member is not reminded twice.
+  - Planning a passage bumps the revision but moves nothing: a delivery already queued or sent to the member for the same group, offset and send time stands, so the member is not reminded twice. The same rule covers a schedule changed and changed back, which deletes a meeting and makes a new one at the same time.
+  - Only live deliveries (pending, sent, failed) count toward I-07's one per revision. A reminder suppressed because the member turned it off, dropped the offset or left the group is owed again if they turn it back on, restore the offset or rejoin before it is due.
+  - A schedule change that deletes a meeting suppresses its pending reminders and takes back their queued emails in the same transaction; the delivery rows stay, without the meeting, as the record.
+  - Queuing re-checks the meeting under a share lock (still scheduled, same revision, still ahead) and the membership, so a change committed during the tick cannot slip a stale reminder into the outbox.
   - The email names the meeting in the recipient's zone with its abbreviation. Where the runtime gives only `GMT+2`, the en-GB names are used (EET, BST); zones with none keep the offset.
   - Open study links to `/study`, which signs in if needed and lands on the group page with Start study; there is no voice to join (D-2026-10-30-02).
-- **Known limit:** a reminder suppressed because the member turned it off is not recreated if they turn it back on before the meeting changes, because I-07 allows one delivery per revision. The next move, cancel-and-restore or the following week's meeting reminds as usual.
 - **Rejected:** creating deliveries only at their send time. A move then leaves no record of what was withdrawn, and S11.4's suppression could not be checked.
 - **Rejected:** marking a delivery `sent` when its job is queued. A crash before SMTP would report a reminder that never went.
 - **Rejected:** a separate scheduler process or cron. One instance runs everything (D-2026-10-30-05); the advisory lock keeps a second instance from doubling up if one ever runs.

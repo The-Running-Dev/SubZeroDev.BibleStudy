@@ -9,6 +9,7 @@ import type { Db, Queryable, Tx } from '../platform/db.ts';
 import { withTransaction } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { isUuid, uuidv7 } from '../platform/ids.ts';
+import { suppressDeliveries } from '../reminders/reminders.ts';
 
 // Meeting occurrences (S10). The group's weekly schedule is materialized eight weeks ahead; each row keeps the
 // wall-clock date and time it was set in, and its instant is derived from them in that zone (I-06).
@@ -229,7 +230,14 @@ export async function updateSchedule(deps: ScheduleDeps, userId: string, groupId
     );
     for (const row of ahead.rows) {
       if (isoWeekday(row.slot_date) !== schedule.weekday) {
-        if (row.status === 'scheduled' && row.planned_book_id === null) await tx.query('DELETE FROM occurrences WHERE id = $1', [row.id]);
+        if (row.status === 'scheduled' && row.planned_book_id === null) {
+          const pending = await tx.query<{ id: string; email_job_id: string | null }>(
+            `SELECT id, email_job_id FROM reminder_deliveries WHERE occurrence_id = $1 AND status = 'pending' FOR UPDATE`,
+            [row.id],
+          );
+          await suppressDeliveries(tx, pending.rows, now);
+          await tx.query('DELETE FROM occurrences WHERE id = $1', [row.id]);
+        }
         continue;
       }
       const startsAt = instantFor(row.slot_date, schedule.localTime, schedule.timeZone);

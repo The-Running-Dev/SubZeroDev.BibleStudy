@@ -5,7 +5,7 @@ import { requireMember } from '../groups/groups.ts';
 import type { Outbox } from '../mail/outbox.ts';
 import { withdrawQueued } from '../mail/outbox.ts';
 import type { Clock } from '../platform/clock.ts';
-import type { Db, Tx } from '../platform/db.ts';
+import type { Db, Queryable, Tx } from '../platform/db.ts';
 import { withTransaction } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { uuidv7 } from '../platform/ids.ts';
@@ -68,7 +68,7 @@ export async function setReminderPreference(deps: { db: Db; clock: Clock }, user
 // Every reminder owed now: (occurrence, revision, member, offset) for scheduled meetings still ahead. No preference row
 // means the default offsets; a disabled preference means none.
 const owed = `
-  SELECT o.id AS occurrence_id, o.revision AS occurrence_revision, m.user_id, off.offset_minutes,
+  SELECT o.id AS occurrence_id, o.revision AS occurrence_revision, o.group_id, m.user_id, off.offset_minutes,
          o.starts_at - make_interval(mins => off.offset_minutes) AS send_after
     FROM occurrences o
     JOIN memberships m ON m.group_id = o.group_id AND m.removed_at IS NULL
@@ -117,22 +117,25 @@ export async function reminderTick(deps: ReminderDeps): Promise<TickResult> {
 
     const suppressed = await suppressUnowed(tx, now);
 
-    // New deliveries for what is owed and not too late. A reminder already sent or being sent for the same meeting,
-    // member and moment is not owed again: planning the passage bumps the revision but moves nothing.
-    const missing = await tx.query<{ occurrence_id: string; occurrence_revision: number; user_id: string; offset_minutes: number; send_after: Date }>(
+    // New deliveries for what is owed and not too late, unless a live one exists for the same revision. A suppressed
+    // one does not count, so a reminder turned off and on again is owed anew. A reminder already sent or being sent to
+    // the member for the same group, offset and moment is not owed again: planning the passage bumps the revision but
+    // moves nothing, and a schedule changed and changed back makes a new meeting at the same time.
+    const missing = await tx.query<{ occurrence_id: string; occurrence_revision: number; group_id: string; user_id: string; offset_minutes: number; send_after: Date }>(
       `SELECT w.* FROM (${owed}) w
         WHERE w.send_after >= $1::timestamptz - make_interval(mins => $3)
           AND NOT EXISTS (SELECT 1 FROM reminder_deliveries d
-                           WHERE d.occurrence_id = w.occurrence_id AND d.user_id = w.user_id AND d.offset_minutes = w.offset_minutes
-                             AND (d.occurrence_revision = w.occurrence_revision
-                                  OR (d.send_after = w.send_after AND (d.status = 'sent' OR (d.status = 'pending' AND d.email_job_id IS NOT NULL)))))`,
+                           WHERE d.user_id = w.user_id AND d.offset_minutes = w.offset_minutes
+                             AND ((d.occurrence_id = w.occurrence_id AND d.occurrence_revision = w.occurrence_revision AND d.status <> 'suppressed')
+                                  OR (d.group_id = w.group_id AND d.send_after = w.send_after
+                                      AND (d.status = 'sent' OR (d.status = 'pending' AND d.email_job_id IS NOT NULL)))))`,
       [now, defaultOffsets, lateMinutes],
     );
     for (const row of missing.rows) {
       await tx.query(
-        `INSERT INTO reminder_deliveries (id, occurrence_id, occurrence_revision, user_id, offset_minutes, send_after, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $7) ON CONFLICT DO NOTHING`,
-        [uuidv7(now.getTime()), row.occurrence_id, row.occurrence_revision, row.user_id, row.offset_minutes, row.send_after, now],
+        `INSERT INTO reminder_deliveries (id, occurrence_id, occurrence_revision, group_id, user_id, offset_minutes, send_after, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) ON CONFLICT DO NOTHING`,
+        [uuidv7(now.getTime()), row.occurrence_id, row.occurrence_revision, row.group_id, row.user_id, row.offset_minutes, row.send_after, now],
       );
     }
 
@@ -156,15 +159,22 @@ async function suppressUnowed(tx: Tx, now: Date): Promise<number> {
       FOR UPDATE OF d`,
     [now, defaultOffsets, lateMinutes],
   );
-  // The worker may claim a queued email meanwhile; only a delivery whose email was really taken back is suppressed.
-  const withdrawn = new Set(await withdrawQueued(tx, stale.rows.flatMap((row) => (row.email_job_id ? [row.email_job_id] : [])), 'reminder suppressed'));
-  const ids = stale.rows.filter((row) => row.email_job_id === null || withdrawn.has(row.email_job_id)).map((row) => row.id);
+  return suppressDeliveries(tx, stale.rows, now);
+}
+
+// Suppresses pending deliveries, taking back each one's email while it is still queued. The worker may claim a queued
+// email meanwhile; only a delivery whose email was really taken back is suppressed, and the rest settle when it finishes.
+export async function suppressDeliveries(tx: Queryable, rows: { id: string; email_job_id: string | null }[], now: Date): Promise<number> {
+  const withdrawn = new Set(await withdrawQueued(tx, rows.flatMap((row) => (row.email_job_id ? [row.email_job_id] : [])), 'reminder suppressed'));
+  const ids = rows.filter((row) => row.email_job_id === null || withdrawn.has(row.email_job_id)).map((row) => row.id);
   if (!ids.length) return 0;
   await tx.query(`UPDATE reminder_deliveries SET status = 'suppressed', updated_at = $2 WHERE id = ANY($1::uuid[])`, [ids, now]);
   return ids.length;
 }
 
 async function enqueueDue(deps: ReminderDeps, tx: Tx, now: Date): Promise<number> {
+  // The meeting row is share-locked and re-checked, so a move or cancel committed since suppressUnowed ran either
+  // waits for this tick (and the next one takes the email back) or keeps the reminder from being queued.
   const due = await tx.query<DueRow>(
     `SELECT d.id, d.offset_minutes, u.email, u.display_name, u.time_zone, g.id AS group_id, g.name AS group_name, o.starts_at,
             o.planned_book_id, o.planned_chapter, o.planned_start_verse, o.planned_end_verse
@@ -173,8 +183,10 @@ async function enqueueDue(deps: ReminderDeps, tx: Tx, now: Date): Promise<number
        JOIN groups g ON g.id = o.group_id
        JOIN users u ON u.id = d.user_id
       WHERE d.status = 'pending' AND d.email_job_id IS NULL AND d.send_after <= $1
+        AND o.status = 'scheduled' AND o.revision = d.occurrence_revision AND o.starts_at > $1
+        AND EXISTS (SELECT 1 FROM memberships m WHERE m.group_id = o.group_id AND m.user_id = d.user_id AND m.removed_at IS NULL)
       ORDER BY d.send_after, d.id
-      FOR UPDATE OF d`,
+      FOR UPDATE OF d FOR SHARE OF o`,
     [now],
   );
   for (const row of due.rows) {

@@ -68,5 +68,6 @@ describe('mail retry policy', () => {
 
   test('fills known placeholders and leaves unknown ones', () => {
     assert.equal(fillPlaceholders('code {{code}} {{other}}', { code: '123456' }), 'code 123456 {{other}}');
+    assert.equal(fillPlaceholders('{{constructor}} {{toString}} {{__proto__}}', {}), '{{constructor}} {{toString}} {{__proto__}}');
   });
 });

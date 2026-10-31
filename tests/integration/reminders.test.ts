@@ -170,6 +170,65 @@ describe('S11 reminder emails', () => {
     assert.deepEqual([...new Set(left.map((d) => d.email))], [ownerEmail]);
   });
 
+  test('reminders turned off and on again before they are due are owed again', async () => {
+    const { member, groupId } = await ownerAndMember();
+    await h.tick();
+    await inject('PUT', member.cookie, `/api/groups/${groupId}/reminders`, { enabled: false, offsetsMinutes: [1440, 60] });
+    assert.equal((await h.tick()).suppressed, 16);
+    await inject('PUT', member.cookie, `/api/groups/${groupId}/reminders`, { enabled: true, offsetsMinutes: [1440, 60] });
+    await h.tick();
+    assert.equal((await deliveries()).filter((d) => d.email === 'member@example.test' && d.status === 'pending').length, 2);
+
+    h.clock.set('2026-11-01T12:15:00Z');
+    assert.equal((await h.tick()).enqueued, 2);
+    await h.worker.runOnce();
+    assert.equal((await remindersTo('member@example.test')).length, 1);
+  });
+
+  test('a schedule change that deletes a meeting takes back its queued reminders; changing back does not send one twice', async () => {
+    const { owner, groupId } = await ownerAndMember();
+    const schedule = (weekday: number) => inject('PATCH', owner.cookie, `/api/groups/${groupId}/schedule`, { weekday, localTime: '06:15', timeZone: 'America/Chicago' });
+    h.clock.set('2026-11-01T12:15:00Z');
+    assert.equal((await h.tick()).enqueued, 2);
+
+    assert.equal((await schedule(2)).statusCode, 200);
+    assert.deepEqual(
+      (await reminderJobs()).map((j) => [j.status, j.last_error]),
+      [
+        ['failed', 'reminder suppressed'],
+        ['failed', 'reminder suppressed'],
+      ],
+      'taken back in the same transaction, before any tick',
+    );
+    assert.equal(await h.worker.runOnce(), 0);
+    const orphaned = await h.db.query<{ status: string }>('SELECT status FROM reminder_deliveries WHERE occurrence_id IS NULL ORDER BY status');
+    assert.deepEqual([...new Set(orphaned.rows.map((r) => r.status))], ['suppressed'], 'the rows stay as the record');
+
+    // Back to Monday: the reminders never went, so they are owed for the new meeting.
+    assert.equal((await schedule(1)).statusCode, 200);
+    assert.equal((await h.tick()).enqueued, 2);
+    assert.equal(await h.worker.runOnce(), 2);
+    await h.tick();
+
+    // Sent this time: away to Tuesday and back again sends nothing more.
+    assert.equal((await schedule(2)).statusCode, 200);
+    assert.equal((await schedule(1)).statusCode, 200);
+    h.clock.set('2026-11-01T12:20:00Z');
+    assert.equal((await h.tick()).enqueued, 0);
+    assert.equal((await remindersTo('member@example.test')).length, 1);
+    assert.equal((await remindersTo(ownerEmail)).length, 1);
+  });
+
+  test('a display name that looks like a placeholder is sent as written', async () => {
+    const { member } = await ownerAndMember();
+    await inject('PATCH', member.cookie, '/api/me', { displayName: 'Mark {{constructor}} {{code}}' });
+    h.clock.set('2026-11-01T12:15:00Z');
+    await h.tick();
+    assert.equal(await h.worker.runOnce(), 2);
+    const [text] = await remindersTo('member@example.test');
+    assert.ok(text.includes('Mark {{constructor}} {{code}}'), text);
+  });
+
   test('S11.4 moving the meeting after the reminder was queued suppresses it and schedules reminders for the new time', async () => {
     const { member, groupId } = await ownerAndMember();
     h.clock.set('2026-11-01T12:15:00Z');

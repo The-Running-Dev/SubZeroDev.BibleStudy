@@ -168,10 +168,13 @@ type ReminderPreference = { enabled: boolean; offsetsMinutes: number[] };
 // GET /api/groups/:groupId/reminders: the caller's own preference; the default ([1440, 60], enabled) until they save one.
 function getReminderPreference(groupId: Uuid): Promise<ReminderPreference>;
 // PUT /api/groups/:groupId/reminders: replaces the caller's preference. Offsets come back sorted, longest first;
-// at most 5, each a whole number of minutes from 5 to 10080. Pending reminders it no longer covers are suppressed at once.
+// at most 5, each a whole number of minutes from 5 to 10080. The next tick suppresses pending reminders it no longer
+// covers, and owes again any it covers that were suppressed.
 function setReminderPreference(groupId: Uuid, pref: ReminderPreference): Promise<ReminderPreference>;
-// in-process, run once a minute under an advisory lock
-function reminderTick(now: Date): Promise<{ materialized: number; enqueued: number; suppressed: number }>;
+// in-process, run once a minute under an advisory lock; deps carry the db, clock, outbox and public URL
+function reminderTick(deps: ReminderDeps): Promise<{ materialized: number; enqueued: number; suppressed: number }>;
+// A schedule change that deletes a meeting suppresses its pending reminders first, in the same transaction.
+function suppressDeliveries(tx: Tx, deliveries: { id: Uuid; email_job_id: Uuid | null }[], now: Date): Promise<number>;
 // The tick withdraws a reminder's job while it is still queued; a job already claimed is left to finish.
 function withdrawQueued(tx: Tx, jobIds: Uuid[], reason: string): Promise<Uuid[]>;
 ```

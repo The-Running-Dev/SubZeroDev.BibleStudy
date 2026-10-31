@@ -1,5 +1,6 @@
--- Reminder emails (S11). A member's preference per group, and one delivery row per (occurrence revision, member,
+-- Reminder emails (S11). A member's preference per group, and one live delivery row per (occurrence revision, member,
 -- offset) the tick has scheduled (I-07). A delivery is the record of what was owed; the email itself is an email_jobs row.
+-- A suppressed delivery no longer counts, so a reminder turned off and on again, or a member who rejoins, is owed anew.
 
 CREATE TABLE reminder_preferences (
   user_id uuid NOT NULL REFERENCES users (id),
@@ -14,8 +15,10 @@ CREATE TABLE reminder_preferences (
 
 CREATE TABLE reminder_deliveries (
   id uuid PRIMARY KEY,
-  occurrence_id uuid NOT NULL REFERENCES occurrences (id) ON DELETE CASCADE,
+  -- Null once a schedule change deleted the meeting; the row stays as the record of what was sent or taken back.
+  occurrence_id uuid REFERENCES occurrences (id) ON DELETE SET NULL,
   occurrence_revision integer NOT NULL,
+  group_id uuid NOT NULL REFERENCES groups (id),
   user_id uuid NOT NULL REFERENCES users (id),
   offset_minutes integer NOT NULL,
   send_after timestamptz NOT NULL,
@@ -23,7 +26,9 @@ CREATE TABLE reminder_deliveries (
   -- Set when the email is queued; the delivery stays pending until that job is sent or fails.
   email_job_id uuid REFERENCES email_jobs (id),
   created_at timestamptz NOT NULL,
-  updated_at timestamptz NOT NULL,
-  UNIQUE (occurrence_id, occurrence_revision, user_id, offset_minutes)
+  updated_at timestamptz NOT NULL
 );
+CREATE UNIQUE INDEX reminder_deliveries_live ON reminder_deliveries (occurrence_id, occurrence_revision, user_id, offset_minutes)
+  WHERE status <> 'suppressed';
 CREATE INDEX reminder_deliveries_status_send_after ON reminder_deliveries (status, send_after);
+CREATE INDEX reminder_deliveries_group_user ON reminder_deliveries (group_id, user_id, send_after);

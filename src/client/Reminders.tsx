@@ -21,9 +21,13 @@ export function Reminders(props: { groupId: string }) {
   const [enabled, setEnabled] = useState(true);
   const [offsets, setOffsets] = useState<number[]>([]);
   const [status, setStatus] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    setSaved(null);
+    setStatus(null);
+    setFailed(false);
     api
       .reminders(props.groupId)
       .then((preference) => {
@@ -31,7 +35,10 @@ export function Reminders(props: { groupId: string }) {
         setEnabled(preference.enabled);
         setOffsets(preference.offsetsMinutes);
       })
-      .catch((failure) => setStatus(messageFor(failure)));
+      .catch((failure) => {
+        setFailed(true);
+        setStatus(messageFor(failure));
+      });
   }, [props.groupId]);
 
   if (!saved) return status ? <p role="alert">{status}</p> : null;
@@ -41,12 +48,15 @@ export function Reminders(props: { groupId: string }) {
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
+    setStatus(null);
     try {
       const preference = await api.updateReminders(props.groupId, { enabled, offsetsMinutes: offsets });
       setSaved(preference);
       setOffsets(preference.offsetsMinutes);
+      setFailed(false);
       setStatus('Reminders saved.');
     } catch (failure) {
+      setFailed(true);
       setStatus(messageFor(failure));
     } finally {
       setBusy(false);
@@ -57,7 +67,15 @@ export function Reminders(props: { groupId: string }) {
     <form className="reminders" aria-label="Reminders" onSubmit={save}>
       <h3>Reminders</h3>
       <label>
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Email me before meetings
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => {
+            setEnabled(e.target.checked);
+            setStatus(null);
+          }}
+        />{' '}
+        Email me before meetings
       </label>
       <fieldset disabled={!enabled}>
         <legend>When</legend>
@@ -66,7 +84,10 @@ export function Reminders(props: { groupId: string }) {
             <input
               type="checkbox"
               checked={offsets.includes(minutes)}
-              onChange={(e) => setOffsets(e.target.checked ? [...offsets, minutes] : offsets.filter((m) => m !== minutes))}
+              onChange={(e) => {
+                setOffsets(e.target.checked ? [...offsets, minutes] : offsets.filter((m) => m !== minutes));
+                setStatus(null);
+              }}
             />{' '}
             {label(minutes)}
           </label>
@@ -75,7 +96,7 @@ export function Reminders(props: { groupId: string }) {
       <button type="submit" disabled={busy}>
         Save reminders
       </button>
-      {status && <p role="status">{status}</p>}
+      {status && <p role={failed ? 'alert' : 'status'}>{status}</p>}
     </form>
   );
 }
