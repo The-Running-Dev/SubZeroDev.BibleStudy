@@ -4,8 +4,11 @@ import type { Disposition, GroupProgressView, QuestionView, WrapUpView } from '.
 import { dispositions } from '../shared/api.ts';
 import { formatReference } from '../shared/reference.ts';
 import { ApiFailure, api, messageFor } from './api.ts';
+import { useOnline } from './online.ts';
 import { formatStop, parseStop, staleNote } from './progress.ts';
 import { statusLabels } from './Questions.tsx';
+
+const offlineStop = 'Not saved: confirming a stopping point needs a connection. Nothing will be sent later.';
 
 const dispositionLabels: Record<Disposition, string> = {
   closed: 'Close',
@@ -28,6 +31,7 @@ export function ConfirmStop(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const online = useOnline();
 
   useEffect(() => {
     let current = true;
@@ -45,6 +49,11 @@ export function ConfirmStop(props: {
     const ref = parseStop(text);
     if (!ref) {
       setError(`"${text}" is not a verse. Try "Romans 2:11".`);
+      return;
+    }
+    // S15.6: a stopping point is confirmed now or not at all; nothing waits to be sent later.
+    if (!navigator.onLine) {
+      setError(offlineStop);
       return;
     }
     setBusy(true);
@@ -69,7 +78,7 @@ export function ConfirmStop(props: {
       if (current) {
         setBasedOn(current);
         setError(staleNote(current));
-      } else setError(messageFor(e));
+      } else setError(e instanceof TypeError ? offlineStop : messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -91,10 +100,11 @@ export function ConfirmStop(props: {
           Current stopping point: {formatStop(basedOn.ref)}, confirmed by {basedOn.confirmedBy}.
         </p>
       )}
+      {!online && <p className="note-state">Confirming needs a connection.</p>}
       {error && <p role="alert">{error}</p>}
       {saved && <p role="status">{saved}</p>}
       <div className="question-actions">
-        <button type="submit" disabled={busy || basedOn === undefined || !text.trim()}>
+        <button type="submit" disabled={busy || !online || basedOn === undefined || !text.trim()}>
           {props.label}
         </button>
       </div>
@@ -130,7 +140,7 @@ export function WrapUp(props: { groupId: string; sessionId: string; onClose: () 
       if (current) {
         replace(current);
         setError(`Someone changed "${current.body ?? 'a removed question'}" first; it is now ${statusLabels[current.status]}. Decide again to replace it.`);
-      } else setError(messageFor(e));
+      } else setError(e instanceof TypeError ? offlineStop : messageFor(e));
     }
   }
 

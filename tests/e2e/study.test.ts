@@ -225,6 +225,25 @@ describe('wrapping up', () => {
     await h.db.query(`UPDATE groups SET shared_translation_id = 'BSB'`);
   });
 
+  test('S15.6 a stopping point confirmed offline is refused and never sent later', async () => {
+    const olive = await openStudy('olive');
+    await olive.page.getByRole('button', { name: 'Wrap up', exact: true }).click();
+    await olive.page.getByRole('button', { name: 'Confirm stopping point' }).waitFor();
+    await olive.page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('.wrap-up button[type="submit"]')!.disabled);
+    await olive.page.getByLabel('Stopping point').fill('Romans 1:9');
+    await olive.page.context().setOffline(true);
+    await olive.page.getByText('Confirming needs a connection.').waitFor();
+    assert.ok(await olive.page.getByRole('button', { name: 'Confirm stopping point' }).isDisabled());
+    // A submit that gets past the disabled button (a keyboard, a stale page) is refused too.
+    await olive.page.evaluate(() => document.querySelector<HTMLFormElement>('.wrap-up form')!.requestSubmit());
+    await olive.page.getByText(/^Not saved: confirming a stopping point needs a connection/).waitFor();
+
+    await olive.page.context().setOffline(false);
+    await olive.page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('.wrap-up button[type="submit"]')!.disabled);
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    assert.equal((await h.db.query('SELECT count(*)::int AS n FROM group_progress')).rows[0].n, 0);
+  });
+
   test('S9.1–S9.4 two members wrap up: the later confirmation is shown the earlier one, a question is carried, and the next study resumes there with it', async () => {
     const asked = await h.app.inject({
       method: 'POST',

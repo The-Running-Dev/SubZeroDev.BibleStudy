@@ -42,6 +42,7 @@ export type ErrorCode =
   | 'stale_revision'
   | 'empty_body'
   | 'stale_progress'
+  | 'conflict_resolved'
   | 'payload_too_large'
   | 'internal';
 

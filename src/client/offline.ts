@@ -43,7 +43,7 @@ const stores = ['downloads', 'notes', 'pendingOps', 'drafts', 'soloPosition', 'm
 
 let opening: Promise<IDBDatabase> | null = null;
 
-function request<T>(req: IDBRequest<T>): Promise<T> {
+export function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'));

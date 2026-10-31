@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import type { PullResponse, PushResult } from '../../shared/api.ts';
+import type { NoteView, PullResponse, PushResult } from '../../shared/api.ts';
 import type { PersonalDeps } from '../personal/personal.ts';
-import { pull, pushOps } from '../personal/personal.ts';
+import { pull, pushOps, resolveConflict } from '../personal/personal.ts';
 import type { AppDeps } from './app.ts';
 import { requireAuth } from './auth.ts';
 
@@ -20,5 +20,12 @@ export function registerSyncRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get('/api/sync/pull', async (request): Promise<PullResponse> => {
     const { cursor } = request.query as Record<string, string | undefined>;
     return pull(personal, requireAuth(request).userId, cursor ?? null);
+  });
+
+  // The member's choice for one of their own conflicts; returns the notes it left (S15).
+  app.post('/api/sync/conflicts/:id', async (request): Promise<NoteView[]> => {
+    const { id } = request.params as { id: string };
+    const { choice } = (request.body ?? {}) as { choice?: unknown };
+    return resolveConflict(personal, requireAuth(request).userId, id, choice);
   });
 }

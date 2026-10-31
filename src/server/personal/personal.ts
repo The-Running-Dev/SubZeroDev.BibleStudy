@@ -265,3 +265,50 @@ export async function ownNotes(q: Queryable, userId: string, ids: string[]): Pro
   const byId = new Map(result.rows.map((r) => [r.id, toNoteView(r)]));
   return ids.map((id) => byId.get(id) as NoteView);
 }
+
+export type ConflictChoice = 'kept_server' | 'kept_incoming' | 'kept_both';
+const choices: readonly ConflictChoice[] = ['kept_server', 'kept_incoming', 'kept_both'];
+
+// The member picks which side of a NoteConflict stays (S15). Kept server leaves the note as it is; kept incoming
+// writes the other device's text over it; kept both adds that text as a new note on the same passage. Returns the
+// notes the choice left, live ones only. Someone else's conflict, or an unknown one, is not found (I-21).
+export async function resolveConflict(deps: PersonalDeps, userId: string, conflictId: unknown, choice: unknown): Promise<NoteView[]> {
+  if (!choices.includes(choice as ConflictChoice)) throw invalid('choice is kept_server, kept_incoming or kept_both.');
+  const notFound = new AppError('not_found', 404, 'No such conflict.');
+  if (!isUuid(conflictId)) throw notFound;
+  return withTransaction(deps.db, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`personal:${userId}`]);
+    const found = await tx.query<{ note_id: string; server_revision: number; incoming_body: string; incoming_device_id: string; resolved_at: Date | null }>(
+      'SELECT note_id, server_revision, incoming_body, incoming_device_id, resolved_at FROM note_conflicts WHERE id = $1 AND user_id = $2 FOR UPDATE',
+      [conflictId, userId],
+    );
+    const conflict = found.rows[0];
+    if (!conflict) throw notFound;
+    if (conflict.resolved_at) throw new AppError('conflict_resolved', 409, 'This conflict was already resolved. Reload your notes.', { retryable: false });
+    const now = deps.clock.now();
+    const note = (await tx.query<NoteRow>(`SELECT ${noteColumns} FROM notes WHERE id = $1 FOR UPDATE`, [conflict.note_id])).rows[0];
+    // The note changed again after the conflict: writing over it would lose text nobody chose against, so both stay.
+    const picked: ConflictChoice = choice === 'kept_incoming' && note.revision !== conflict.server_revision ? 'kept_both' : (choice as ConflictChoice);
+    const kept: NoteRow[] = [];
+    if (picked === 'kept_incoming') {
+      const updated = await tx.query<NoteRow>(
+        `UPDATE notes SET body = $2, deleted_at = NULL, updated_at = $3, revision = revision + 1, device_id = $4, change_seq = nextval('personal_changes')
+          WHERE id = $1 RETURNING ${noteColumns}`,
+        [note.id, conflict.incoming_body, now, conflict.incoming_device_id],
+      );
+      kept.push(updated.rows[0]);
+    } else {
+      kept.push(note);
+    }
+    if (picked === 'kept_both') {
+      const copy = await tx.query<NoteRow>(
+        `INSERT INTO notes (id, user_id, translation_id, book_id, chapter, start_verse, end_verse, body, revision, updated_at, device_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10) RETURNING ${noteColumns}`,
+        [uuidv7(now.getTime()), userId, note.translation_id, note.book_id, note.chapter, note.start_verse, note.end_verse, conflict.incoming_body, now, conflict.incoming_device_id],
+      );
+      kept.push(copy.rows[0]);
+    }
+    await tx.query('UPDATE note_conflicts SET resolved_at = $2, resolution = $3 WHERE id = $1', [conflictId, now, picked]);
+    return kept.filter((n) => n.deleted_at === null).map(toNoteView);
+  });
+}

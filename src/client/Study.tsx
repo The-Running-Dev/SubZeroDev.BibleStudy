@@ -371,6 +371,7 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
             </div>
             <AskForm
               groupId={groupId}
+              userId={props.userId}
               at={{ translationId: state.translationId, bookId, chapter }}
               verse={verse}
               onPosted={(question) => {
