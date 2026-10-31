@@ -113,7 +113,15 @@ function Conversation(props: {
 
   // `missed` is true when this page may have missed deltas (first load, reconnect): open turns become partial.
   function absorb(transcript: AssistantTranscript, missed: boolean) {
-    showTurns(transcript.turns);
+    // A fetch answered before a turn finished, or before it was sent, never takes back what an event already showed:
+    // a finished turn stays finished, and a turn sent from this page stays listed.
+    const known = new Map(turnsRef.current.map((t) => [t.id, t]));
+    const fetched = transcript.turns.map((t) => {
+      const local = known.get(t.id);
+      return local && isTerminal(local) && !isTerminal(t) ? local : t;
+    });
+    const listed = new Set(fetched.map((t) => t.id));
+    showTurns([...fetched, ...turnsRef.current.filter((t) => !listed.has(t.id))]);
     for (const entry of transcript.entries) if (entry.kind === 'message') addAnswer(entry.turnId, entry.seq, entry.text);
     const open = new Set(transcript.turns.filter((t) => !isTerminal(t)).map((t) => t.id));
     if (missed) markPartial(open);
@@ -186,11 +194,9 @@ function Conversation(props: {
       onStatus: (s) => {
         setLive(s);
         if (s === 'open') {
-          // Whatever happened while the page was away is in the transcript.
-          if (wasOpen) {
-            void refresh(true);
-            api.assistantStatus().then(props.onStatus, () => undefined);
-          }
+          // Whatever happened while the page was away, or before the channel first opened, is in the transcript.
+          void refresh(true);
+          if (wasOpen) api.assistantStatus().then(props.onStatus, () => undefined);
           wasOpen = true;
         }
       },

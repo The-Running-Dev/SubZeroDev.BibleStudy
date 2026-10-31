@@ -102,10 +102,11 @@ async function disconnect(): Promise<void> {
   socket = null;
 }
 
-async function open(cookie: string): Promise<void> {
+async function open(cookie: string, setup?: (page: Page) => Promise<void>): Promise<void> {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.addCookies([{ name: 'bs_session', value: cookie, url: baseUrl }]);
   page = await context.newPage();
+  await setup?.(page);
   // The panel decides what to show from the first status call.
   const statusSeen = page.waitForResponse((r) => r.url().endsWith('/api/assistant/status'));
   await page.goto(baseUrl);
@@ -200,6 +201,28 @@ describe('the assistant panel', () => {
     await open(ownerCookie);
     await ask('List the files in your working directory.');
     await panel().getByRole('alert').getByText('The assistant tried to use a tool; this turn was stopped').waitFor();
+  });
+
+  test('S6.5 a tool turn that fails before the live channel opens still says so', async () => {
+    await connect();
+    runtime.script = 'tool';
+    // The page's live channel opens only after the turn has failed, so the failure is never pushed to it.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await open(ownerCookie, (p) =>
+      p.routeWebSocket(/\/ws$/, async (ws) => {
+        await released;
+        ws.connectToServer();
+      }),
+    );
+    await ask('List the files in your working directory.');
+    for (let i = 0; i < 250; i++) {
+      const failed = await h.db.query(`SELECT 1 FROM assistant_turns WHERE failure = 'tool_attempt'`);
+      if (failed.rowCount) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    release();
+    await panel().getByRole('alert').getByText('The assistant tried to use a tool; this turn was stopped').waitFor({ timeout: 10_000 });
   });
 
   test('a link dropped mid-answer shows the answer is being checked', async () => {
