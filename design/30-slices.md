@@ -266,7 +266,7 @@ Acceptance:
 Out of scope: multi-window and account switching (S16).
 
 ## S16 — Updates, logout and export that never lose data
-Status: todo
+Status: done
 Delivers: Members get app updates only when they approve them and it is safe, and logging out or switching accounts hides the previous account's data everywhere. Anyone can export their own data.
 Touches: client shell (update prompt, `requestUpdate`, `switchAccount`), service worker, personal (`exportPersonal`)
 Depends on: S15

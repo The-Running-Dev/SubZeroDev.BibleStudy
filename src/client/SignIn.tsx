@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { CodeDelivery, Profile } from '../shared/api.ts';
 import { api, messageFor } from './api.ts';
 import { clearInvitation, invalidInvitationMessage, pendingInvitation } from './invitation.ts';
+import { holdUpdate } from './shell.ts';
 
 const slowDeliveryMs = 30_000;
 const statusPollMs = 5_000;
@@ -42,6 +43,8 @@ export function SignIn(props: { onSignedIn: (profile: Profile, notice: string | 
   const [error, setError] = useState<string | null>(null);
   const [requestedAt, setRequestedAt] = useState(saved?.requestedAt ?? 0);
   const invited = pendingInvitation() !== null;
+  // S16: no update while a code is on its way, so the step is not lost to a reload.
+  useEffect(() => (step === 'code' ? holdUpdate('signing_in') : undefined), [step]);
 
   async function requestCode(event?: FormEvent) {
     event?.preventDefault();

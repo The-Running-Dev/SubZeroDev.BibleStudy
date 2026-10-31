@@ -8,6 +8,8 @@ import { clearInvitation, invalidInvitationMessage, pendingInvitation } from './
 import { forgetProfile, rememberProfile, rememberedProfile } from './offline.ts';
 import { ProfileForm } from './ProfileForm.tsx';
 import { Reader } from './Reader.tsx';
+import { onAccountSwitch, onUpdateReady, requestUpdate, switchAccount, updateReady } from './shell.ts';
+import type { UpdateResult } from './shell.ts';
 import { SignIn } from './SignIn.tsx';
 import { Study } from './Study.tsx';
 
@@ -32,8 +34,45 @@ async function acceptPending(): Promise<string | null> {
   }
 }
 
+const refusals: Record<Extract<UpdateResult, { applied: false }>['reason'], string> = {
+  live_session: 'Leave the study session first, then update.',
+  signing_in: 'Finish signing in first, then update.',
+  multiple_windows: 'Close the other windows of this app first, then update.',
+};
+
+// S16: a new build is applied only when the member says so, and only when nothing would be cut off.
+function UpdatePrompt() {
+  const [ready, setReady] = useState(updateReady);
+  const [refused, setRefused] = useState<string | null>(null);
+  useEffect(() => onUpdateReady(() => setReady(true)), []);
+  if (!ready) return null;
+  async function apply() {
+    const result = await requestUpdate();
+    setRefused(result.applied ? null : refusals[result.reason]);
+  }
+  return (
+    <div className="update-ready" role="status">
+      <span>Update ready</span>
+      <button type="button" onClick={apply}>
+        Update
+      </button>
+      {refused && <span className="update-refused">{refused}</span>}
+    </div>
+  );
+}
+
 export function App() {
+  return (
+    <>
+      <UpdatePrompt />
+      <Account />
+    </>
+  );
+}
+
+function Account() {
   const [state, setState] = useState<State>({ kind: 'loading' });
+  const signedIn = state.kind === 'home' || state.kind === 'setup' ? state.profile.id : null;
 
   useEffect(() => {
     api
@@ -56,6 +95,14 @@ export function App() {
     if (state.kind === 'home' || state.kind === 'setup') rememberProfile(state.profile);
   }, [state]);
 
+  // Another window logged out or signed in as someone else: this one stops showing the account at once.
+  useEffect(() => {
+    if (!signedIn) return;
+    return onAccountSwitch((userId) => {
+      if (userId !== signedIn) setState({ kind: 'signed-out' });
+    });
+  }, [signedIn]);
+
   switch (state.kind) {
     case 'loading':
       return <main className="screen" aria-busy="true" />;
@@ -67,7 +114,14 @@ export function App() {
       );
     case 'signed-out':
       // A first sign-in goes through profile setup so the name and time zone are the member's own.
-      return <SignIn onSignedIn={(profile, notice) => setState({ kind: 'setup', profile, notice })} />;
+      return (
+        <SignIn
+          onSignedIn={(profile, notice) => {
+            void switchAccount(profile.id);
+            setState({ kind: 'setup', profile, notice });
+          }}
+        />
+      );
     case 'setup':
       return (
         <main className="screen">
@@ -113,6 +167,7 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
   async function signOut() {
     await api.logout().catch(() => undefined);
     forgetProfile();
+    await switchAccount(null);
     props.onSignedOut();
   }
 
