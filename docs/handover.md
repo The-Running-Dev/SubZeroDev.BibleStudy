@@ -4,7 +4,7 @@ What v1 does, how each requirement in [design/00-brief.md](../design/00-brief.md
 
 ## Test results
 
-From the CI run on `1ba12c8` (S18, merged into main) ([run 41247294152](https://github.com/The-Running-Dev/SubZeroDev.BibleStudy/actions/runs/41247294152)):
+From the CI run on `1ba12c8`, the S18 pull request tested merged with main ([run 41247294152](https://github.com/The-Running-Dev/SubZeroDev.BibleStudy/actions/runs/41247294152)):
 
 | Gate | Result |
 |---|---|
