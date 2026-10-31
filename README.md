@@ -62,6 +62,25 @@ A private Bible-study app for a small group: shared narrated reading, questions 
    ```
    The connector starts the runtime, keeps its state in `CONNECTOR_STATE_DIR` (default `data/connector`), and gives each conversation its own empty working directory there. Claude runs with every tool, MCP server and user setting removed, and a turn that still asks for a tool is denied, stopped and shown as such. With the PC off or the connector stopped, the panel says the assistant is offline; reading and narration are unaffected. A connector restarted mid-answer resumes the runtime's event log, so the answer is neither lost nor shown twice.
 
+10. **Demo data (optional)**
+
+   On an empty, migrated database with Romans imported (step 5), with `OWNER_EMAIL` set to an `@example.test` address such as `owner@example.test`:
+   ```bash
+   npm run demo:seed
+   ```
+   This creates the group with three synthetic members (`anna`, `mark` and `ruth` at `example.test`), three questions on Romans 1–2 with replies, and a few notes. Their invitations are accepted in the database, so no link is shown or sent, and every demo member's reminders are off, so nothing is emailed. It refuses any other `OWNER_EMAIL`, and a second run changes nothing. Sign in as any of them; the code arrives in Mailpit.
+
+## Install on a phone
+
+Installing is optional; the app works in the phone's browser. The account panel's **Install the app** shows these steps on the phone itself.
+
+- **iPhone (Safari):** open the app's address, tap **Share**, then **Add to Home Screen**, then **Add**. Open it from the new icon. An installed app on iOS keeps its own storage, so sign in again there and download chapters again.
+- **Android (Chrome):** open the app's address and tap **Install** when Chrome offers it, or open the ⋮ menu and choose **Install app** (or **Add to Home screen**). The installed app shares Chrome's storage and sign-in.
+
+To read and listen with no connection, open a chapter, choose **Download for offline**, pick text only or text with narration (the size is shown first), and wait for **Ready**.
+
+[docs/handover.md](docs/handover.md) lists how each requirement was checked, the checks not yet performed, and the remaining limitations.
+
 ## Integration and browser tests
 
 `npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services` and empties their tables, so re-import afterwards. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`. The content tests import Romans from the live AO Lab API (`AOLAB_BASE_URL` overrides it), so they need network access; import failures and retries are tested against a local fixture server.
