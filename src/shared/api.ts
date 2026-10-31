@@ -37,6 +37,9 @@ export type ErrorCode =
   | 'assistant_not_permitted'
   | 'assistant_offline'
   | 'turn_in_progress'
+  | 'not_author'
+  | 'stale_revision'
+  | 'empty_body'
   | 'internal';
 
 export interface ApiError {
@@ -216,7 +219,65 @@ export interface DriftReport {
   perClient: { clientId: Uuid; p95Ms: number }[];
 }
 
-// The realtime channel (/ws). S8 adds questions to the snapshot, S6 the assistant events.
+// ---- questions ----
+
+export type QuestionStatus = 'open' | 'closed' | 'carried' | 'resolved' | 'no_longer_relevant';
+export const questionStatuses: readonly QuestionStatus[] = ['open', 'closed', 'carried', 'resolved', 'no_longer_relevant'];
+
+export interface Author {
+  userId: Uuid;
+  displayName: string;
+}
+
+// A removed post keeps its place (and its replies) with `body` null.
+export interface ReplyView {
+  id: Uuid;
+  author: Author;
+  body: string | null;
+  removed: boolean;
+  editedAt: IsoInstant | null;
+  createdAt: IsoInstant;
+  revision: number;
+}
+
+export interface QuestionView {
+  id: Uuid;
+  anchor: PassageRef & { translationId: TranslationId };
+  kind: 'verse' | 'range' | 'chapter';
+  author: Author;
+  body: string | null;
+  removed: boolean;
+  editedAt: IsoInstant | null;
+  createdAt: IsoInstant;
+  status: QuestionStatus;
+  replies: ReplyView[];
+  // Edits name this; a reply does not raise it, so it never makes the author's edit stale.
+  revision: number;
+  // Raised by every change to the question or its replies: of two copies, the higher is newer.
+  version: number;
+}
+
+export interface PostQuestionRequest {
+  clientOpId: Uuid;
+  anchor: PassageRef & { translationId: TranslationId };
+  body: string;
+}
+
+export interface PostReplyRequest {
+  clientOpId: Uuid;
+  body: string;
+}
+
+export interface EditPostRequest {
+  expectedRevision: number;
+  body: string;
+}
+
+export interface DeletePostResponse {
+  outcome: 'deleted' | 'body_removed';
+}
+
+// The realtime channel (/ws). The snapshot carries the open questions on the session's chapter; S6 adds the assistant events.
 export type ClientMessage =
   | { t: 'hello'; clientId: Uuid }
   | { t: 'ping'; clientSentMs: number }
@@ -226,10 +287,12 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { t: 'pong'; clientSentMs: number; serverMs: number }
-  | { t: 'snapshot'; state: PlaybackState; presence: Presence[] }
+  | { t: 'snapshot'; state: PlaybackState; presence: Presence[]; questions: QuestionView[] }
   | { t: 'state'; state: PlaybackState }
   | { t: 'result'; commandId: Uuid; outcome: CommandOutcome; state: PlaybackState; reason?: string }
   | { t: 'presence'; presence: Presence[] }
+  // A question on the group's passage was posted, replied to, edited or removed. A removed one with no replies is gone.
+  | { t: 'question'; question: QuestionView }
   | { t: 'assistant'; event: AssistantEvent }
   | { t: 'error'; error: ErrorCode; retryable: boolean };
 

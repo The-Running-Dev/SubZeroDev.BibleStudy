@@ -262,7 +262,7 @@ function wrapUpSuggestion(groupId: Uuid, sessionId: Uuid): Promise<{ suggested: 
 ```ts
 interface QuestionView { id: Uuid; anchor: PassageRef & { translationId: TranslationId }; kind: 'verse' | 'range' | 'chapter';
   author: { userId: Uuid; displayName: string }; body: string | null; removed: boolean; editedAt: IsoInstant | null; createdAt: IsoInstant;
-  status: 'open' | 'closed' | 'carried' | 'resolved' | 'no_longer_relevant'; replies: ReplyView[]; revision: number; }
+  status: 'open' | 'closed' | 'carried' | 'resolved' | 'no_longer_relevant'; replies: ReplyView[]; revision: number; version: number; }
 interface ReplyView { id: Uuid; author: { userId: Uuid; displayName: string }; body: string | null; removed: boolean; editedAt: IsoInstant | null; createdAt: IsoInstant; revision: number; }
 
 // GET /api/groups/:groupId/questions?book&chapter&status

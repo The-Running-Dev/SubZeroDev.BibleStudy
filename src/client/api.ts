@@ -11,8 +11,15 @@ import type {
   ChapterView,
   RecordingsResponse,
   CodeDelivery,
+  DeletePostResponse,
+  EditPostRequest,
+  PostQuestionRequest,
+  PostReplyRequest,
   Profile,
   ProfilePatch,
+  QuestionStatus,
+  QuestionView,
+  ReplyView,
   RequestCodeResponse,
   SendTurnRequest,
   SendTurnResponse,
@@ -81,7 +88,23 @@ export const api = {
   // 200 with `existing: true` when this clientTurnId was sent before.
   sendTurn: (conversationId: string, request: SendTurnRequest) => call<SendTurnResponse>('POST', `/api/assistant/conversations/${conversationId}/turns`, request),
   interruptTurn: (turnId: string) => call<{ status: AssistantTurnStatus }>('POST', `/api/assistant/turns/${turnId}/interrupt`),
+  questions: (groupId: string, filter: { bookId: string; chapter: number; status?: QuestionStatus[] }) => {
+    const query = new URLSearchParams({ book: filter.bookId, chapter: String(filter.chapter) });
+    if (filter.status) query.set('status', filter.status.join(','));
+    return call<QuestionView[]>('GET', `/api/groups/${groupId}/questions?${query}`);
+  },
+  // The same clientOpId again returns what the first attempt posted.
+  postQuestion: (groupId: string, request: PostQuestionRequest) => call<QuestionView>('POST', `/api/groups/${groupId}/questions`, request),
+  postReply: (groupId: string, questionId: string, request: PostReplyRequest) => call<ReplyView>('POST', `/api/groups/${groupId}/questions/${questionId}/replies`, request),
+  // 409 `stale_revision` when the post changed since `expectedRevision`.
+  editPost: (groupId: string, target: { questionId: string } | { replyId: string }, request: EditPostRequest) =>
+    call<QuestionView | ReplyView>('PATCH', postUrl(groupId, target), request),
+  deletePost: (groupId: string, target: { questionId: string } | { replyId: string }) => call<DeletePostResponse>('DELETE', postUrl(groupId, target)),
 };
+
+function postUrl(groupId: string, target: { questionId: string } | { replyId: string }): string {
+  return 'questionId' in target ? `/api/groups/${groupId}/questions/${target.questionId}` : `/api/groups/${groupId}/replies/${target.replyId}`;
+}
 
 export function messageFor(error: unknown): string {
   if (error instanceof ApiFailure) {

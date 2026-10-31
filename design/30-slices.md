@@ -149,7 +149,7 @@ Acceptance:
 Out of scope: monitoring or paging; a second environment.
 
 ## S8 — Post and answer questions on verses
-Status: todo
+Status: done
 Delivers: Members preparing during the week can post questions on a verse, a range or a whole chapter, and reply to each other without joining the study. During the study, those questions pop up as the narration reaches their verses.
 Touches: questions (posts, replies, edits, deletes), study (questions in the snapshot and `question` messages), client questions UI
 Depends on: S5

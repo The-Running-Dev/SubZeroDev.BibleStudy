@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { ChapterView, Command, PassageRef, PlaybackState, Presence, RecordingView, ServerMessage, TranslationId, TranslationView } from '../shared/api.ts';
+import type { ChapterView, Command, PassageRef, PlaybackState, Presence, QuestionView, RecordingView, ServerMessage, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById } from '../shared/books.ts';
 import { verseAtSeconds } from '../shared/playback.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
@@ -8,6 +8,8 @@ import { ApiFailure, api, messageFor } from './api.ts';
 import { connectLive } from './live.ts';
 import type { Live, LiveStatus } from './live.ts';
 import { Passage } from './Passage.tsx';
+import { applyQuestion, mergeQuestions, pacedBy, reveal, unsettled } from './questions.ts';
+import { AskForm, QuestionList } from './Questions.tsx';
 import { rangeOf, syncStep, targetSeconds } from './sync.ts';
 
 const rates = [0.75, 1, 1.25, 1.5];
@@ -19,7 +21,7 @@ const preparingPollMs = 5_000;
 type Entry = { kind: 'checking' } | { kind: 'idle'; active: boolean; error: string | null } | { kind: 'joined'; sessionId: string; state: PlaybackState };
 
 // The group's shared study: start or join, then everyone follows one PlaybackState.
-export function Study(props: { groupId: string }) {
+export function Study(props: { groupId: string; userId: string }) {
   const [entry, setEntry] = useState<Entry>({ kind: 'checking' });
 
   const check = useCallback(() => {
@@ -54,7 +56,7 @@ export function Study(props: { groupId: string }) {
       </section>
     );
   }
-  return <LiveStudy key={entry.sessionId} sessionId={entry.sessionId} initial={entry.state} onEnded={check} />;
+  return <LiveStudy key={entry.sessionId} groupId={props.groupId} userId={props.userId} sessionId={entry.sessionId} initial={entry.state} onEnded={check} />;
 }
 
 function statusLine(state: PlaybackState): string {
@@ -87,8 +89,8 @@ function connectionNote(status: LiveStatus): string | null {
   return 'Too many open tabs. Close another tab and reload.';
 }
 
-function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: () => void }) {
-  const { sessionId, onEnded } = props;
+function LiveStudy(props: { groupId: string; userId: string; sessionId: string; initial: PlaybackState; onEnded: () => void }) {
+  const { groupId, sessionId, onEnded } = props;
   const [state, setState] = useState<PlaybackState>(props.initial);
   const [presence, setPresence] = useState<Presence[]>([]);
   const [status, setStatus] = useState<LiveStatus>('connecting');
@@ -96,6 +98,8 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
   const [blocked, setBlocked] = useState(false);
   const [verse, setVerse] = useState<number | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
+  const [questions, setQuestions] = useState<QuestionView[]>([]);
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
   // Re-renders the position label and slider while playing.
   const [, setNow] = useState(0);
   const live = useRef<Live | null>(null);
@@ -118,6 +122,10 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
         case 'snapshot':
           accept(message.state);
           setPresence(message.presence);
+          setQuestions(message.questions);
+          return;
+        case 'question':
+          setQuestions((list) => applyQuestion(list, message.question, stateRef.current.passage));
           return;
         case 'state':
           accept(message.state);
@@ -193,6 +201,31 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
   useEffect(() => {
     if (state.status === 'ended') onEnded();
   }, [state.status, onEnded]);
+
+  // The questions on the shared chapter, again whenever it changes or a post here changed one.
+  const { bookId, chapter } = state.passage;
+  const [questionsLoad, setQuestionsLoad] = useState(0);
+  useEffect(() => {
+    let current = true;
+    api
+      .questions(groupId, { bookId, chapter, status: unsettled })
+      .then((list) => current && setQuestions((local) => mergeQuestions(local, list, { bookId, chapter })))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [groupId, bookId, chapter, questionsLoad]);
+
+  // Without verse timing there is nothing to pace the questions by, so they are all shown. A new chapter starts over.
+  const paced = pacedBy(state);
+  const chapterKey = `${bookId} ${chapter}`;
+  const revealedFor = useRef(chapterKey);
+  useEffect(() => {
+    const fresh = revealedFor.current !== chapterKey;
+    revealedFor.current = chapterKey;
+    setShown((previous) => reveal(questions, paced ? verse : Number.MAX_SAFE_INTEGER, fresh ? new Set() : previous));
+  }, [questions, verse, chapterKey, paced]);
+  const visible = questions.filter((q) => shown.has(q.id));
 
   function send(command: Command) {
     const id = live.current?.command(sessionId, stateRef.current.revision, command) ?? null;
@@ -285,6 +318,22 @@ function LiveStudy(props: { sessionId: string; initial: PlaybackState; onEnded: 
               </li>
             ))}
           </ul>
+          <section className="questions" aria-label="Questions">
+            <h2>Questions</h2>
+            <div aria-live="polite">
+              <QuestionList groupId={groupId} userId={props.userId} questions={visible} onChanged={() => setQuestionsLoad((n) => n + 1)} empty="No questions on this chapter yet." />
+            </div>
+            <AskForm
+              groupId={groupId}
+              at={{ translationId: state.translationId, bookId, chapter }}
+              verse={verse}
+              onPosted={(question) => {
+                // One's own question shows at once, wherever the reading is.
+                setQuestions((list) => applyQuestion(list, question, state.passage));
+                setShown((previous) => new Set([...previous, question.id]));
+              }}
+            />
+          </section>
           <button type="button" className="secondary" onClick={() => send({ kind: 'end_session' })}>
             End study
           </button>
