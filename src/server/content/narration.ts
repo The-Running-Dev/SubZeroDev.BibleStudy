@@ -266,7 +266,7 @@ function toView(row: RecordingRow): RecordingView {
 }
 
 export async function narrationAvailability(db: Queryable, translationId: TranslationId): Promise<Availability> {
-  if (translationId === 'CSB') return { state: 'unavailable', reason: 'No CSB narration is licensed.' };
+  if (translationId === 'CSB') return { state: 'unavailable', reason: 'No licensed CSB recording.' };
   const narrators = await enabledNarrators(db, translationId);
   return narrators.length ? { state: 'available' } : { state: 'unavailable', reason: 'No narrator has a recorded license.' };
 }

@@ -5,6 +5,7 @@ import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
 import { AssistantPanel } from './Assistant.tsx';
+import { reportFums } from './fums.ts';
 import { Notes, inChapter } from './Notes.tsx';
 import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
@@ -124,6 +125,12 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   }, [translationId, at.bookId, at.chapter]);
 
   const shown = text.kind === 'ready' && text.chapter.bookId === at.bookId && text.chapter.chapter === at.chapter ? text.chapter : null;
+
+  // S13.6: each display of CSB text is reported to API.Bible.
+  const fumsToken = shown?.fums?.token;
+  useEffect(() => {
+    if (fumsToken) reportFums(fumsToken, props.userId);
+  }, [fumsToken, shown?.bookId, shown?.chapter, props.userId]);
 
   // A jump to a verse scrolls it into view once its chapter is on screen; a plain chapter starts at the top.
   // `at` is a new object on every jump, so entering the same reference again scrolls back to it.

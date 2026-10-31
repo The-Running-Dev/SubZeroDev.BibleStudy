@@ -23,6 +23,8 @@ export interface Config {
   assistantOwnerEmail: string | null;
   // The bearer the PC connector presents on /connector. Null: every link is refused.
   connectorToken: string | null;
+  // API.Bible, the licensed CSB source (S13). Null without APIBIBLE_KEY: CSB is not_configured.
+  apibible: { key: string; bibleId: string; baseUrl: string } | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -70,7 +72,30 @@ export function loadConfig(env: Env = process.env): Config {
     ...contentSettings(env),
     assistantOwnerEmail: env.ASSISTANT_OWNER_EMAIL?.trim().toLowerCase() || null,
     connectorToken: env.CONNECTOR_TOKEN?.trim() || null,
+    apibible: null,
   };
+
+  const apibibleKey = env.APIBIBLE_KEY?.trim();
+  if (apibibleKey) {
+    const bibleId = env.APIBIBLE_CSB_BIBLE_ID?.trim() ?? '';
+    if (apibibleKey.startsWith('replace-with')) problems.push('APIBIBLE_KEY is still the example placeholder');
+    if (!bibleId || bibleId.startsWith('replace-with')) problems.push('APIBIBLE_CSB_BIBLE_ID is required when APIBIBLE_KEY is set');
+    const baseUrl = (env.APIBIBLE_BASE_URL?.trim() || 'https://rest.api.bible/v1').replace(/\/+$/, '');
+    // The key travels in a header: never over plain http, except to a stand-in on this machine.
+    let parsed: URL | null;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      parsed = null;
+    }
+    const local = parsed !== null && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    if (!parsed || !(parsed.protocol === 'https:' || (parsed.protocol === 'http:' && local))) {
+      problems.push('APIBIBLE_BASE_URL must be an https URL (http only for localhost)');
+    }
+    config.apibible = { key: apibibleKey, bibleId, baseUrl };
+  } else if (env.APIBIBLE_CSB_BIBLE_ID?.trim()) {
+    problems.push('APIBIBLE_CSB_BIBLE_ID is set without APIBIBLE_KEY');
+  }
 
   if (config.appSecret && config.appSecret.length < 32) problems.push('APP_SECRET must be at least 32 characters');
   // The example files' placeholders pass the length check and are public.
