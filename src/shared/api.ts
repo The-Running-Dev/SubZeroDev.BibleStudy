@@ -157,6 +157,35 @@ export interface InvitationView {
   state: 'open' | 'accepted' | 'revoked' | 'expired';
 }
 
+export type OccurrenceStatus = 'scheduled' | 'cancelled';
+
+// One meeting. `anchor` is the wall-clock time it was set in; `viewer` is the same instant in the viewer's profile zone.
+export interface OccurrenceView {
+  id: Uuid;
+  startsAt: IsoInstant;
+  status: OccurrenceStatus;
+  revision: number;
+  plannedPassage: PassageRef | null;
+  anchor: { localDate: string; localTime: string; timeZone: IanaZone };
+  viewer: { localDate: string; localTime: string; timeZone: IanaZone; abbreviation: string };
+}
+
+// PATCH /api/groups/:groupId/occurrences/:id. `localDate` and `localTime` are in the anchor's zone.
+export interface UpdateOccurrenceRequest {
+  expectedRevision: number;
+  localDate?: string;
+  localTime?: string;
+  status?: OccurrenceStatus;
+  plannedPassage?: PassageRef | null;
+}
+
+// PATCH /api/groups/:groupId/schedule (owner).
+export interface ScheduleRequest {
+  weekday: number;
+  localTime: string;
+  timeZone: IanaZone;
+}
+
 // POST /api/invitations/accept, for a member who is already signed in when they open a link.
 export interface AcceptInvitationResponse {
   joinedGroupId: Uuid | null;

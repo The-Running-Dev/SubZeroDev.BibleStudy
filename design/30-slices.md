@@ -176,7 +176,7 @@ Acceptance:
 Out of scope: schedule (S10).
 
 ## S10 — See the meeting time in your own time zone
-Status: todo
+Status: done
 Delivers: Every member sees the next meetings at the right local time for them, correct across both countries' clock changes, and any member can move, cancel or plan the passage for an occurrence.
 Touches: schedule (occurrences, `listOccurrences`, `updateOccurrence`, `localizeOccurrence`, `instantFor`), owner schedule edit, client schedule view
 Depends on: S4

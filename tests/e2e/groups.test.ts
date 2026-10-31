@@ -117,7 +117,7 @@ describe('joining a group', () => {
 
     assert.equal(await group.locator('.members li').count(), 2);
     await group.getByRole('button', { name: 'Remove…' }).click();
-    await group.getByRole('button', { name: 'Cancel' }).click();
+    await group.getByRole('button', { name: 'Cancel', exact: true }).click();
     assert.equal(await group.locator('.members li').count(), 2);
     await group.getByRole('button', { name: 'Remove…' }).click();
     await group.getByRole('button', { name: 'Remove', exact: true }).click();

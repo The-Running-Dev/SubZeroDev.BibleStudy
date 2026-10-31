@@ -65,6 +65,7 @@ All server entities are persisted in PostgreSQL unless marked *in-memory*. Ident
 - Fields: `id`, `groupId`, `localDate`, `localTime`, `timeZone`, `startsAt` (derived from those three when written, and re-derived whenever the zone database changes), `status` (`scheduled` | `cancelled`), `plannedPassage` (nullable reference), `revision`.
 - Materialized on a rolling eight-week window from the Group schedule.
 - Moving an occurrence edits its local date or time and bumps `revision`.
+- Each also keeps the schedule date it was made for (`slotDate`) and whether a member moved it (`moved`). A schedule change re-times the ones ahead nobody moved; at most one scheduled occurrence falls on a group's local date.
 - No UTC offset is stored as an input; `startsAt` is derived and recomputed (DOD-03).
 
 **ReminderPreference**
