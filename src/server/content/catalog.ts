@@ -67,6 +67,7 @@ export interface StoredChapter {
   etag: string;
   // The response body: ChapterView with the stored content spliced in byte for byte (I-10).
   body: string;
+  expiresAt: string | null;
 }
 
 interface ChapterRow {
@@ -136,5 +137,10 @@ export async function getChapter(db: Queryable, translationId: TranslationId, bo
   });
   // Both are JSON objects: drop the head's closing brace and the content's opening one, and join.
   const etag = row.expires_at ? `"${row.content_sha256}-${row.expires_at.getTime()}"` : `"${row.content_sha256}"`;
-  return { contentSha256: row.content_sha256, etag, body: `${head.slice(0, -1)},${row.content.slice(1)}` };
+  return {
+    contentSha256: row.content_sha256,
+    etag,
+    body: `${head.slice(0, -1)},${row.content.slice(1)}`,
+    expiresAt: row.expires_at ? row.expires_at.toISOString() : null,
+  };
 }

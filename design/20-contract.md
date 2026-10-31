@@ -205,7 +205,7 @@ function getChapter(translationId: TranslationId, bookId: BookId, chapter: numbe
 // GET /api/content/:translation/:book/:chapter/recordings — may trigger on-demand import
 function listRecordings(translationId: TranslationId, bookId: BookId, chapter: number): Promise<{ recordings: RecordingView[]; preparing: string[]; failed: { narratorId: string; reason: string }[] }>;
 // GET /media/:sha256 — byte ranges, immutable cache headers
-// GET /api/content/:translation/:book/:chapter/download-manifest
+// GET /api/content/:translation/:book/:chapter/download-manifest[?narration=true] — no-store; asset urls are the chapter route and /media/:sha256
 function downloadManifest(translationId: TranslationId, bookId: BookId, chapter: number, withNarration: boolean): Promise<{ assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[]; totalBytes: number; expiresAt: IsoInstant | null }>;
 
 // pure
@@ -352,10 +352,10 @@ type ConnectorToServer =
 
 ```ts
 type SaveState = 'saving' | 'saved_on_device' | 'pending_sync' | 'synced' | 'save_failed';
-type DownloadState = { state: 'absent' } | { state: 'downloading'; doneBytes: number; totalBytes: number } | { state: 'ready'; expiresAt: IsoInstant | null }
+type DownloadState = { state: 'absent' } | { state: 'downloading'; doneBytes: number; totalBytes: number } | { state: 'ready'; expiresAt: IsoInstant | null; withNarration: boolean }
   | { state: 'failed'; reason: string } | { state: 'expired' };
 
-function downloadChapter(userId: Uuid, ref: { translationId: TranslationId; bookId: BookId; chapter: number }, withNarration: boolean, signal: AbortSignal): Promise<DownloadState>;
+function downloadChapter(userId: Uuid, ref: { translationId: TranslationId; bookId: BookId; chapter: number }, withNarration: boolean, signal: AbortSignal, onProgress?: (state: DownloadState) => void): Promise<DownloadState>;   // verifies length and sha256 before ready
 function removeDownload(userId: Uuid, ref: { translationId: TranslationId; bookId: BookId; chapter: number }): Promise<void>;   // never touches notes
 function saveNote(userId: Uuid, note: { id: Uuid; anchor: NoteView['anchor']; body: string }): Promise<SaveState>;
 function saveDraftQuestion(userId: Uuid, draft: { id: Uuid; anchor: QuestionView['anchor']; body: string }): Promise<SaveState>;
@@ -433,6 +433,7 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `invalid_request` (400): a malformed change, an empty one, a passage that is not a chapter of the book or uses a verse number above 176 (the chapter's own verse count is checked once its text is imported, S13), a move to a time already past or more than ten years ahead, or a `from`/`to` that is not an ISO instant between 2000 and 2200. Retry: no.
 
 **content**
+- `narration_unavailable` (409): a download with narration asked for a chapter with no recording ready. Retry: yes while the narration is preparing, otherwise no. Offer text only.
 - `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. This includes a CSB chapter API.Bible could not supply (S13.4). Retry: no. Show the reason.
 - `chapter_not_found` (404): no such book or chapter. Retry: no.
 - `upstream_failed` (502): an on-demand import failed. Retry: yes, after backoff.

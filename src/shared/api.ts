@@ -30,6 +30,7 @@ export type ErrorCode =
   | 'unavailable'
   | 'translation_unavailable'
   | 'chapter_not_found'
+  | 'narration_unavailable'
   | 'upstream_failed'
   | 'not_member'
   | 'not_owner'
@@ -116,6 +117,13 @@ export interface RecordingView {
   bytes: number;
   durationSeconds: number;
   timing: RecordingTiming;
+}
+
+// Everything a device stores to read a chapter offline, with the hash of each asset's exact bytes (I-27).
+export interface DownloadManifest {
+  assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[];
+  totalBytes: number;
+  expiresAt: IsoInstant | null;
 }
 
 // `preparing` lists narrators whose recording is being fetched on first request; poll again after 5 s.

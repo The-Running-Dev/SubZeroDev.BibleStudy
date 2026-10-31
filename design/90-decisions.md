@@ -8,6 +8,18 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S14: downloads are verified against a server manifest and kept per member in IndexedDB and Cache Storage
+- **Context:** S14 lets a member read and hear a chapter with no connection after a full close, with the size shown first, and an interrupted download must never look ready (DOD-23, DOD-24).
+- **Chosen:**
+  - The server answers `GET /api/content/:t/:b/:c/download-manifest[?narration=true]` with each asset's url, sha256 and length: the chapter JSON, and the first ready recording's `/media/:sha256` file. No recording ready answers 409 `narration_unavailable`, retryable while it is preparing.
+  - The browser streams each asset, checks length and sha256, keeps the chapter in IndexedDB (`biblestudy`, keyed by user id) and the audio in Cache Storage `media-v1`, and writes the download record last. A failure or cancel removes what it added, so a partial download is never `ready`.
+  - Audio shared by two downloads is kept until neither references it. Removing a download never touches notes.
+  - The service worker caches only the app shell, listed at build time. Offline, the reader falls back to the device copy when the server is unreachable, and plays the narration from a blob URL.
+  - The signed-in profile is remembered on the device so the app opens offline; a 401 or signing out forgets it.
+  - Install help names Safari's Share → Add to Home Screen on iPhone, and offers Chrome's own prompt (or the menu steps) on Android.
+- **Rejected:** caching chapters in the service worker by URL. It cannot tell a member's downloads apart, give a size first, or prove a download is whole.
+- **Not performed:** S14.7 needs the owner's real iPhone and Android phone.
+
 ### 2026-10-31 — S13: CSB is fetched per chapter from API.Bible by the server; Fair Use is reported by the browser
 - **Context:** S13 serves CSB only from API.Bible (I-11), keeps no copy past 14 days, and reports Fair Use as the API terms require, including for displays made offline. No API.Bible key exists yet, so the live call (S13.3) cannot be run.
 - **Chosen:**

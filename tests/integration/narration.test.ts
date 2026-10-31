@@ -352,6 +352,41 @@ describe('narration from a fixture source', () => {
     assert.equal(stale.statusCode, 200);
     assert.equal(stale.rawPayload.length, size);
   });
+
+  test('S14 a download manifest names each asset with the hash and length of the exact bytes the device will receive', async () => {
+    const manifestUrl = '/api/content/BSB/JUD/1/download-manifest';
+    assert.equal((await h.app.inject({ method: 'GET', url: manifestUrl })).statusCode, 401);
+
+    const text = await get(manifestUrl);
+    assert.equal(text.statusCode, 200);
+    assert.equal(text.headers['cache-control'], 'no-store');
+    const chapter = await get('/api/content/BSB/JUD/1');
+    assert.deepEqual(text.json(), {
+      assets: [{ url: '/api/content/BSB/JUD/1', sha256: sha256Hex(chapter.rawPayload), bytes: chapter.rawPayload.length, kind: 'chapter' }],
+      totalBytes: chapter.rawPayload.length,
+      expiresAt: null,
+    });
+
+    // Narration not yet stored: refused and queued, so asking again shortly succeeds.
+    const early = await get(`${manifestUrl}?narration=true`);
+    assert.equal(early.statusCode, 409);
+    assert.equal(early.json().error, 'narration_unavailable');
+    assert.equal(early.json().retryable, true);
+    assert.equal((await h.db.query('SELECT 1 FROM audio_jobs')).rowCount, 2);
+
+    await createAudioWorker(deps()).runOnce();
+    const full = (await get(`${manifestUrl}?narration=true`)).json();
+    const listed = (await get('/api/content/BSB/JUD/1/recordings')).json().recordings[0];
+    assert.equal(full.assets.length, 2);
+    const audio = full.assets[1];
+    assert.deepEqual(audio, { url: listed.mediaUrl, sha256: listed.mediaSha256, bytes: listed.bytes, kind: 'audio' });
+    const media = await get(audio.url);
+    assert.equal(sha256Hex(media.rawPayload), audio.sha256);
+    assert.equal(media.rawPayload.length, audio.bytes);
+    assert.equal(full.totalBytes, chapter.rawPayload.length + audio.bytes);
+
+    assert.equal((await get('/api/content/BSB/JUD/2/download-manifest')).json().error, 'chapter_not_found');
+  });
 });
 
 describe('Romans narration imported live from AO Lab', () => {

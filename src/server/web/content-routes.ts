@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { getChapter, listBooks, listTranslations, parseTranslationId } from '../content/catalog.ts';
+import { downloadManifest } from '../content/downloads.ts';
 import { mediaPath, sha256Pattern } from '../content/media-store.ts';
 import { findMedia, listRecordings } from '../content/narration.ts';
 import { AppError } from '../platform/errors.ts';
@@ -43,6 +44,23 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
     reply.header('etag', etag).header('cache-control', 'private, no-cache');
     if (request.headers['if-none-match'] === etag) return reply.status(304).send();
     return reply.type('application/json; charset=utf-8').send(stored.body);
+  });
+
+  // S14: what to store for this chapter offline, and how big it is, before the download starts.
+  app.get('/api/content/:translation/:book/:chapter/download-manifest', async (request, reply) => {
+    const params = request.params as { translation: string; book: string; chapter: string };
+    const chapter = /^\d{1,3}$/.test(params.chapter) ? Number(params.chapter) : NaN;
+    const query = request.query as Record<string, unknown>;
+    const { queued, ...manifest } = await downloadManifest(
+      { db: deps.db, clock: deps.clock, mediaDir: deps.config.mediaDir, csb: deps.csb ?? null },
+      parseTranslationId(params.translation),
+      params.book.toUpperCase(),
+      chapter,
+      query.narration === 'true',
+    );
+    if (queued) deps.onAudioQueued?.();
+    reply.header('cache-control', 'no-store');
+    return manifest;
   });
 
   app.get('/api/content/:translation/:book/:chapter/recordings', async (request, reply) => {

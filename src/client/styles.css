@@ -462,3 +462,82 @@ button:disabled {
 .starting-point summary {
   cursor: pointer;
 }
+
+.download {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.download-row,
+.download-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+.download-progress progress {
+  flex: 1;
+  min-width: 8rem;
+  accent-color: var(--accent);
+}
+
+.download-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #9ca3af;
+  border-radius: 0.5rem;
+}
+
+.download-dialog p {
+  margin: 0;
+}
+
+.download-dialog fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+
+.download-note {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0.5rem 0;
+}
+
+.downloads ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.downloads li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.downloads h2,
+.install-help h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.install-help ol {
+  margin: 0;
+  padding-left: 1.25rem;
+}
