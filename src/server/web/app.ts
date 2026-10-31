@@ -24,6 +24,7 @@ import { registerReminderRoutes } from './reminder-routes.ts';
 import { registerScheduleRoutes } from './schedule-routes.ts';
 import { registerStudyRoutes } from './study-routes.ts';
 import { registerSyncRoutes } from './sync-routes.ts';
+import { registerExportRoutes } from './export-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
 import type { RealtimeHub } from '../study/realtime.ts';
@@ -131,6 +132,7 @@ export async function buildApp(input: AppDeps): Promise<FastifyInstance> {
   registerReminderRoutes(app, deps);
   registerAssistantRoutes(app, deps, hub);
   registerSyncRoutes(app, deps);
+  registerExportRoutes(app, deps);
 
   const staticRoot = resolve(config.staticDir);
   const hasClient = existsSync(resolve(staticRoot, 'index.html'));

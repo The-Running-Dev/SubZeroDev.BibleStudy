@@ -8,6 +8,17 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S16: updates wait in the service worker for approval, and accounts are broadcast between windows
+- **Context:** S16 must apply a new build only when the member approves it and nothing would be cut off, hide an account in every open window when it logs out, and let anyone export their own data (DOD-27).
+- **Chosen:**
+  - The service worker no longer calls `skipWaiting` on install. A new build waits; the page shows "Update ready" once a waiting worker exists and an older one controls the page. The page checks for a new build hourly.
+  - `requestUpdate` refuses with `live_session` while joined to a study session and `signing_in` while a code is being entered, both counted in the page. Otherwise it asks the waiting worker, which counts the app's windows with `clients.matchAll` and refuses with `multiple_windows` when there is more than one, or calls `skipWaiting`. The page reloads once the new worker takes control.
+  - Caches are named by build, and notes, drafts and downloads live in IndexedDB and `media-v1`, which an update never touches.
+  - `switchAccount` posts the signed-in user id (null after a logout) on the BroadcastChannel `bs-account`. A window showing another account returns to sign-in at once; its local records were already keyed by user id, so the next account reads none of them.
+  - `GET /api/export` returns one JSON file read in a single repeatable-read transaction: profile, live notes, solo position, the questions and replies the member wrote, and their conversations with prompts and transcript text. It leaves out other members' posts, even the questions the member replied to, and every runtime id and the context sent with a prompt.
+- **Rejected:** applying updates on the next launch without asking. A launch during a session would change the client under a live playback, and the brief asks for approval.
+- **Rejected:** counting windows with a BroadcastChannel ping. Windows that are frozen in the background do not answer; the service worker sees every window it controls.
+
 ### 2026-10-31 — S15: saves land on the device first, one waiting op per note, and conflicts are chosen by the member
 - **Context:** S15 must say "Saved on this device" only once a save is stored, sync without duplicates when the connection returns, and keep both versions when two devices edit the same note (DOD-25, DOD-26).
 - **Chosen:**

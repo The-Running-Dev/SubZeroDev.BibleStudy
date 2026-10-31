@@ -12,6 +12,7 @@ import { Passage } from './Passage.tsx';
 import { formatStop } from './progress.ts';
 import { applyQuestion, mergeQuestions, pacedBy, reveal } from './questions.ts';
 import { AskForm, QuestionList } from './Questions.tsx';
+import { holdUpdate } from './shell.ts';
 import { rangeOf, syncStep, targetSeconds } from './sync.ts';
 import { ConfirmStop, WrapUp } from './WrapUp.tsx';
 
@@ -44,6 +45,9 @@ export function Study(props: { groupId: string; userId: string }) {
       });
   }, [props.groupId]);
   useEffect(check, [check]);
+  // S16: no update while joined, so the session is never cut off.
+  const joined = entry.kind === 'joined';
+  useEffect(() => (joined ? holdUpdate('live_session') : undefined), [joined]);
   const ended = useCallback(
     (sessionId: string) => {
       setLastSession(sessionId);
