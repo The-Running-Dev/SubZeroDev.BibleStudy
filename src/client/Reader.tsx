@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { ChapterView, NoteView, PassageRef, SoloPosition, TranslationId, TranslationView } from '../shared/api.ts';
+import type { ChapterView, NoteView, PassageRef, SoloPosition, SyncOp, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
@@ -15,6 +15,8 @@ type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView } | { ki
 const start: PassageRef = { bookId: 'ROM', chapter: 1, startVerse: null, endVerse: null };
 // The solo position is saved once the reader has stayed put this long.
 const positionDelayMs = 2_000;
+// A failed first pull is tried again this often; the reader can move meanwhile.
+const pullRetryMs = 5_000;
 
 const positionKey = (p: SoloPosition) => `${p.translationId} ${p.bookId} ${p.chapter}:${p.verse}`;
 
@@ -34,6 +36,8 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   const [restored, setRestored] = useState(false);
   const moved = useRef(false);
   const savedPosition = useRef<string | null>(null);
+  // The place still waiting out the delay, saved at once if the reader leaves first.
+  const pendingPosition = useRef<SoloPosition | null>(null);
 
   function load(restore: boolean) {
     return api.pull(null).then((personal) => {
@@ -48,32 +52,57 @@ export function Reader(props: { groupId: string | null; userId: string }) {
     });
   }
 
-  useEffect(() => {
-    let current = true;
-    load(true).then(
-      () => current && setRestored(true),
+  function savePosition(position: SoloPosition, keepalive = false) {
+    pendingPosition.current = null;
+    const op: SyncOp = { opId: crypto.randomUUID(), entity: 'solo_position', op: 'set', baseRevision: null, position };
+    return api.push([op], keepalive).then(
+      () => (savedPosition.current = positionKey(position)),
       () => undefined,
     );
+  }
+
+  useEffect(() => {
+    let current = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const attempt = () =>
+      load(true).then(
+        () => current && setRestored(true),
+        () => {
+          if (current) retry = setTimeout(attempt, pullRetryMs);
+        },
+      );
+    void attempt();
     return () => {
       current = false;
+      clearTimeout(retry);
     };
     // Once per page; `load` reads refs and setters only.
   }, []);
 
   const verse = playing ?? at.startVerse ?? 1;
   useEffect(() => {
-    if (!restored) return;
+    // Before the saved place is back, only a place the reader chose is saved.
+    if (!restored && !moved.current) return;
     const position: SoloPosition = { translationId, bookId: at.bookId, chapter: at.chapter, verse };
-    const key = positionKey(position);
-    if (key === savedPosition.current) return;
-    const timer = setTimeout(() => {
-      api.push([{ opId: crypto.randomUUID(), entity: 'solo_position', op: 'set', baseRevision: null, position }]).then(
-        () => (savedPosition.current = key),
-        () => undefined,
-      );
-    }, positionDelayMs);
+    if (positionKey(position) === savedPosition.current) {
+      pendingPosition.current = null;
+      return;
+    }
+    pendingPosition.current = position;
+    const timer = setTimeout(() => void savePosition(position), positionDelayMs);
     return () => clearTimeout(timer);
   }, [restored, translationId, at.bookId, at.chapter, verse]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (pendingPosition.current) void savePosition(pendingPosition.current, true);
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
 
   useEffect(() => {
     api

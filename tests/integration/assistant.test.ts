@@ -370,7 +370,8 @@ describe('asking (S6.1 with a fake runtime, S6.4)', () => {
     const response = await api('POST', cookie, `/api/assistant/conversations/${id}/turns`, {
       clientTurnId: randomUUID(),
       prompt: 'How do my notes fit the passage?',
-      context: { ...romans(16, 17), noteIds: [second, first] },
+      // An uppercase id names the same note.
+      context: { ...romans(16, 17), noteIds: [second.toUpperCase(), first] },
     });
     assert.equal(response.statusCode, 202, response.body);
     const { turnId } = response.json();
@@ -387,7 +388,7 @@ describe('asking (S6.1 with a fake runtime, S6.4)', () => {
     const member = await signIn(h, 'member@example.test', new URL(invite).pathname.replace('/join/', ''));
     const theirs = randomUUID();
     assert.equal((await api('POST', member.cookie, '/api/sync/push', { ops: [note(theirs, 16, 'Mine alone.')] })).statusCode, 200);
-    for (const noteIds of [[gone], [randomUUID()], [first, theirs], [first, first]]) {
+    for (const noteIds of [[gone], [randomUUID()], [first, theirs], [first, first], [first, first.toUpperCase()]]) {
       const refused = await api('POST', cookie, `/api/assistant/conversations/${id}/turns`, { clientTurnId: randomUUID(), prompt: 'Why?', context: { ...romans(16, 17), noteIds } });
       assert.equal(refused.statusCode, 400, JSON.stringify(noteIds));
       assert.equal(refused.json().error, 'invalid_request');

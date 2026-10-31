@@ -12,14 +12,22 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - **Context:** S12 needs private notes and a solo place that no group endpoint can reach (I-21), operations applied once (I-22), and a personal display translation that leaves the group's shared one alone.
 - **Chosen:**
   - Notes and the solo position share one `personal_changes` sequence. A push takes a per-user advisory lock, so change numbers rise in commit order and a pull cursor (the highest number seen) never skips a write. Pull reads rows and cursor in one snapshot.
-  - Every operation is recorded in `sync_operations` with its outcome; a known `opId` returns the stored outcome without applying again. An `opId` or note id another user owns is refused, never overwritten.
+  - Every operation is recorded in `sync_operations` with its outcome; a known `opId` returns the stored outcome without applying again (a conflict comes back as the same conflict, with its id). An `opId` or note id another user owns is refused, never overwritten. A new note saved again after a lost response reuses its note id and `opId`, so it is stored once.
+  - An edit that meets a newer version closes the edit form, shows the newer text, and keeps the unsaved edit under it to copy, so a second Save cannot go out on the old revision.
   - An edit applies only on the revision it saw. A stale edit with the same text is treated as applied; with other text it becomes a `note_conflicts` row and the note is unchanged. S12 records conflicts and returns them from pull; choosing between them is S15.
-  - The reader restores the saved solo position before it saves any, then saves the place 2 s after the reader stops moving, so scrolling past a chapter writes one row, not dozens.
+  - The reader restores the saved solo position before it saves any, then saves the place 2 s after the reader stops moving, so scrolling past a chapter writes one row, not dozens. A place still waiting out the delay is saved at once when the page is hidden or the reader closes. A failed first pull is retried every 5 s; a place the reader chooses meanwhile is saved.
+  - The solo position is last-arrival-wins and ignores `baseRevision`: it is one place, not text, and the newest place is the useful one. Narration moves it verse by verse, at most one save per 2 s.
   - The personal display translation is chosen in the study view and shown only there and only to that member, labelled "Your display translation"; the group's shared translation is untouched.
   - Notes given to the assistant are chosen from the notes on the passage being read, sent as ids, and resolved on the server from the asker's own live notes; the bodies are stored in the turn's context in the order asked.
 - **Rejected:** last-write-wins on note edits. A second device's older edit would silently erase the first.
 - **Rejected:** sending note bodies with the assistant turn. The server could not tell a member's own note from text they typed, and I-21 would rest on the client.
 - **Rejected:** saving the solo position on every scroll. It floods the push queue once offline saving lands (S15).
+- **Left for later:**
+  - `sync_operations` is never pruned. S15 decides how long a device can stay offline and prunes past that.
+  - A deleted note's text stays in its `note_conflicts` rows and in the stored context of assistant turns it went with. Removing a person's data (S16) removes both.
+  - The notes given to one assistant turn are capped by count (20) and size each (64 KB), not in total; a request body is capped at 16 MB.
+  - A reload after a conflict replaces the notes with the pulled set even if a save landed meanwhile; S15's offline queue replaces this path.
+  - S12.4 checks the display translation choice and the group's shared one; the CSB text itself is checked in S13, when CSB is available.
 
 ### 2026-10-31 — S11: reminder deliveries are owed rows, reconciled each minute, and never sent late
 - **Context:** S11 needs one email per member, meeting and offset (I-07), nothing for a moved, cancelled or removed case, no duplicate after a crash, and preferences that leave login codes alone (I-08).

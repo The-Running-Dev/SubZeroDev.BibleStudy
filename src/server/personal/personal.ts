@@ -66,7 +66,9 @@ function parseOp(value: unknown): SyncOp {
   }
   if (o.entity !== 'note') throw invalid('An operation entity is note or solo_position.');
   if (!isUuid(o.entityId)) throw invalid('A note operation names the note id (UUID).');
-  if (typeof o.deviceId !== 'string' || !o.deviceId || o.deviceId.length > maxDeviceId) throw invalid('A note operation names the device.');
+  if (typeof o.deviceId !== 'string' || !o.deviceId || o.deviceId.length > maxDeviceId || o.deviceId.includes('\u0000')) {
+    throw invalid('A note operation names the device.');
+  }
   if (o.op === 'upsert') {
     return { opId: o.opId, entity: 'note', entityId: o.entityId, op: 'upsert', baseRevision, anchor: parseAnchor(o.anchor), body: parseBody(o.body), deviceId: o.deviceId };
   }
@@ -191,15 +193,16 @@ export async function pushOps(deps: PersonalDeps, userId: string, body: unknown)
     const now = deps.clock.now();
     const results: PushResult[] = [];
     for (const op of ops) {
-      const seen = await tx.query<{ user_id: string; resulting_revision: number; conflict_id: string | null }>(
-        'SELECT user_id, resulting_revision, conflict_id FROM sync_operations WHERE op_id = $1',
+      const seen = await tx.query<{ user_id: string; outcome: Outcome; resulting_revision: number; conflict_id: string | null }>(
+        'SELECT user_id, outcome, resulting_revision, conflict_id FROM sync_operations WHERE op_id = $1',
         [op.opId],
       );
       const first = seen.rows[0];
       if (first) {
         if (first.user_id !== userId) throw invalid('That opId was already used. Send the operation with a new opId.');
-        // I-22: a retried operation reports what the first attempt did, and changes nothing.
-        results.push({ opId: op.opId, outcome: 'already_applied', revision: first.resulting_revision, ...(first.conflict_id ? { conflictId: first.conflict_id } : {}) });
+        // I-22: a retried operation reports what the first attempt did, and changes nothing: a conflict stays a conflict.
+        const outcome = first.outcome === 'conflict' ? 'conflict' : 'already_applied';
+        results.push({ opId: op.opId, outcome, revision: first.resulting_revision, ...(first.conflict_id ? { conflictId: first.conflict_id } : {}) });
         continue;
       }
       results.push(op.entity === 'note' ? await applyNote(tx, userId, op, now) : await applySolo(tx, userId, op, now));

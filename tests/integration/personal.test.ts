@@ -98,6 +98,7 @@ describe('solo mode (S12.1, S12.2)', () => {
 
   test('S12.2 moving through Romans 4 alone leaves the group stopping point; confirming the group stop leaves the solo position', async () => {
     const { owner, groupId } = await ownerAndMember();
+    // No chapter is imported in this harness, so the group's stops are written directly; S9 tests the confirm endpoint.
     await h.db.query(
       `INSERT INTO group_progress (id, group_id, book_id, chapter, verse, confirmed_by, confirmed_at) VALUES (gen_random_uuid(), $1, 'ROM', 2, 11, $2, $3)`,
       [groupId, owner.userId, h.clock.now()],
@@ -187,6 +188,18 @@ describe('private notes (S12.3)', () => {
     assert.deepEqual(personal.conflicts, [{ id: stale.conflictId, noteId: id, serverBody: 'Two.', incomingBody: 'Other device.' }]);
   });
 
+  test('a conflicted operation sent again reports the same conflict and records no second one', async () => {
+    const { member } = await ownerAndMember();
+    const id = randomUUID();
+    await push(member.cookie, [upsert(id, 'One.')]);
+    await push(member.cookie, [upsert(id, 'Two.', 1)]);
+    const stale = upsert(id, 'Other device.', 1);
+    const [first] = await push(member.cookie, [stale]);
+    assert.equal(first.outcome, 'conflict');
+    assert.deepEqual(await push(member.cookie, [stale]), [{ opId: stale.opId, outcome: 'conflict', revision: 2, conflictId: first.conflictId }]);
+    assert.equal((await pull(member.cookie)).conflicts.length, 1);
+  });
+
   test('a delete on the current revision removes the note; pull after a cursor reports it deleted', async () => {
     const { member } = await ownerAndMember();
     const keep = randomUUID();
@@ -216,6 +229,7 @@ describe('private notes (S12.3)', () => {
       [{ ...upsert(id, 'x'), anchor: { ...romans4(5), endVerse: 4 } }],
       [{ ...upsert(id, 'x'), body: 'nul\u0000' }],
       [{ ...upsert(id, 'x'), deviceId: '' }],
+      [{ ...upsert(id, 'x'), deviceId: 'nul\u0000' }],
       [{ opId: randomUUID(), entity: 'note', entityId: id, op: 'delete', baseRevision: null, deviceId: device }],
       [{ ...moveTo(4, 3), position: { translationId: 'NIV', bookId: 'ROM', chapter: 4, verse: 3 } }],
       [upsert(id, 'Fine.'), { ...upsert(randomUUID(), 'x'), entity: 'bookmark' }],

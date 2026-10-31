@@ -40,6 +40,7 @@ describe('S12 push parsing', () => {
       { ops: [{ ...upsert(), baseRevision: 1.5 }] },
       { ops: [{ ...upsert(), op: 'patch' }] },
       { ops: [{ ...upsert(), deviceId: 'd'.repeat(101) }] },
+      { ops: [{ ...upsert(), deviceId: 'a\u0000b' }] },
       { ops: [{ ...upsert(), anchor: { ...anchor, translationId: 'KJV' } }] },
       { ops: [{ ...upsert(), anchor: { ...anchor, chapter: 0 } }] },
       { ops: [{ ...upsert(), anchor: { ...anchor, startVerse: 0 } }] },

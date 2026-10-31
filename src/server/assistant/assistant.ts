@@ -125,8 +125,10 @@ function parseTurn(body: unknown): TurnInput {
   if (!Array.isArray(noteIds) || noteIds.length > maxNotesPerTurn || !noteIds.every(isUuid)) {
     throw invalid(`noteIds is a list of at most ${maxNotesPerTurn} note ids.`);
   }
-  if (new Set(noteIds).size !== noteIds.length) throw invalid('Each note can be attached once.');
-  return { clientTurnId: b.clientTurnId, prompt, translationId: parseTranslationId(context.translationId), ref: parseRef(context.ref), noteIds };
+  // Ids are stored lowercase; an uppercase one names the same note.
+  const ids = noteIds.map((id: string) => id.toLowerCase());
+  if (new Set(ids).size !== ids.length) throw invalid('Each note can be attached once.');
+  return { clientTurnId: b.clientTurnId, prompt, translationId: parseTranslationId(context.translationId), ref: parseRef(context.ref), noteIds: ids };
 }
 
 // Narrows a connector message; null when its shape is wrong.

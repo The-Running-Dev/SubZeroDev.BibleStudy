@@ -51,9 +51,11 @@ export class ApiFailure extends Error {
   }
 }
 
-async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+// `keepalive` lets a request finish after the page is gone (a place saved on leaving).
+async function call<T>(method: string, url: string, body?: unknown, keepalive = false): Promise<T> {
   const response = await fetch(url, {
     method,
+    keepalive,
     credentials: 'same-origin',
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -127,7 +129,7 @@ export const api = {
   // The suggested stopping point and the questions to settle; also the questions the study keeps in view.
   wrapUp: (groupId: string, sessionId: string) => call<WrapUpView>('GET', `/api/groups/${groupId}/session/${sessionId}/wrap-up`),
   // The caller's own note and solo-position operations, applied in order; each result says what became of its op.
-  push: (ops: SyncOp[]) => call<{ results: PushResult[] }>('POST', '/api/sync/push', { ops }),
+  push: (ops: SyncOp[], keepalive = false) => call<{ results: PushResult[] }>('POST', '/api/sync/push', { ops }, keepalive),
   // The caller's own notes changed after `cursor` (every live one without it), solo position and open conflicts.
   pull: (cursor: string | null) => call<PullResponse>('GET', cursor === null ? '/api/sync/pull' : `/api/sync/pull?cursor=${encodeURIComponent(cursor)}`),
 };

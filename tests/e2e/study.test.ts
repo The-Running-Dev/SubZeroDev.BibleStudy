@@ -305,11 +305,14 @@ describe('your own translation (S12.4)', () => {
     await mark.page.getByLabel('Your display translation').selectOption('CSB');
     await mark.page.getByTestId('display-translation').getByText('Your display translation is CSB. The group reads BSB.').waitFor();
 
-    const users = await h.db.query('SELECT id, display_translation_id FROM users WHERE id = ANY($1) ORDER BY email', [[people.mark.userId, people.olive.userId]]);
-    assert.deepEqual(
-      Object.fromEntries(users.rows.map((r) => [r.id, r.display_translation_id])),
-      { [people.mark.userId]: 'CSB', [people.olive.userId]: null },
-    );
+    // The view changes before the saved choice is written; wait for the write.
+    const chosen = async () => {
+      const users = await h.db.query('SELECT id, display_translation_id FROM users WHERE id = ANY($1)', [[people.mark.userId, people.olive.userId]]);
+      return Object.fromEntries(users.rows.map((r) => [r.id, r.display_translation_id]));
+    };
+    const expected = { [people.mark.userId]: 'CSB', [people.olive.userId]: null };
+    for (let i = 0; i < 50 && (await chosen())[people.mark.userId] !== 'CSB'; i++) await mark.page.waitForTimeout(100);
+    assert.deepEqual(await chosen(), expected);
     const group = await h.db.query('SELECT shared_translation_id FROM groups');
     assert.deepEqual(group.rows, [{ shared_translation_id: 'BSB' }]);
     assert.equal(await olive.page.getByTestId('display-translation').count(), 0);
