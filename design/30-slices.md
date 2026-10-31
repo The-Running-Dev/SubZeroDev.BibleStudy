@@ -278,7 +278,7 @@ Acceptance:
 Out of scope: background sync (not in v1).
 
 ## S17 — Works on small phones and real devices
-Status: todo
+Status: done
 Delivers: Every screen works on the smallest phones in either orientation, with larger text and the keyboard open. Phone-specific audio behaviour on the owner's devices is checked and written down.
 Touches: client layout across reader, controls, questions, downloads, install help, assistant
 Depends on: S16
@@ -292,6 +292,7 @@ Acceptance:
     - headphones and Bluetooth output;
     - speaker echo when the group call runs alongside.
     - This needs the owner's phones. Until then it is reported as not performed.
+  - Checked: S17.1 and S17.2 in `tests/e2e/layout.test.ts`. S17.3 is checked in Chromium with the insets overridden through CDP, not in a simulator (no Mac here). S17.4 is not performed.
 Out of scope: new features.
 
 ## S18 — Hand over: setup, demo and results

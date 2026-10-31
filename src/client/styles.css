@@ -7,12 +7,15 @@
 
 body {
   margin: 0;
+  /* S17: a long address or word breaks rather than widening a small phone's page. */
+  overflow-wrap: break-word;
 }
 
 .screen {
   max-width: 28rem;
   margin: 0 auto;
-  padding: max(1.5rem, env(safe-area-inset-top)) 1rem 2rem;
+  padding: max(1.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -35,6 +38,8 @@ input,
 select,
 button {
   font: inherit;
+  box-sizing: border-box;
+  max-width: 100%;
   min-height: 2.75rem;
   padding: 0 0.75rem;
   border-radius: 0.5rem;
@@ -73,11 +78,12 @@ button:disabled {
 .reader {
   max-width: 40rem;
   margin: 0 auto;
-  padding: 0 1rem 2rem;
+  padding: 0 max(1rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
 }
 
 .home-bar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 1rem;
   margin-top: max(0.5rem, env(safe-area-inset-top));
@@ -194,10 +200,27 @@ button:disabled {
   gap: 0.5rem;
 }
 
+/* S17: at 200 % text a long book name wraps to its own line and is cut short rather than widening the page. */
+.reader-controls {
+  flex-wrap: wrap;
+}
+
+.reader-controls select {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .reader-controls select:nth-child(2),
 .reader-jump input {
   flex: 1;
   min-width: 0;
+}
+
+/* S17: on a short screen (landscape, or the keyboard up) the bar scrolls away instead of covering the chapter. */
+@media (max-height: 34rem) {
+  .reader-bar {
+    position: static;
+  }
 }
 
 .reader-jump {
@@ -383,9 +406,14 @@ button:disabled {
 
 .questions-bar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
+}
+
+.questions-bar select {
+  min-width: 0;
 }
 
 .question-list,
@@ -445,8 +473,22 @@ button:disabled {
 
 .question-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   align-items: center;
+}
+
+/* S17: while a composer is on screen its buttons stay at the bottom of what is visible, so the on-screen keyboard
+   never hides them. */
+.question-form .question-actions,
+.note-new button[type='submit'] {
+  position: sticky;
+  bottom: 0;
+}
+
+.question-form .question-actions {
+  background: Canvas;
+  padding: 0.5rem 0;
 }
 
 .wrap-up h3 {
@@ -574,7 +616,7 @@ button:disabled {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 0.75rem;
-  padding: max(0.5rem, env(safe-area-inset-top)) 1rem 0.5rem;
+  padding: max(0.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) 0.5rem max(1rem, env(safe-area-inset-left));
   background: var(--accent);
   color: #fff;
 }

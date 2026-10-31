@@ -8,6 +8,17 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S17: small phones are checked in Chromium emulation, and the composers keep their buttons with CSS alone
+- **Context:** S17 must show every main screen at 320×568 and 360×640, in either orientation and at 200 % text, without sideways scroll, and keep the composers' buttons in view with the on-screen keyboard open.
+- **Chosen:**
+  - `tests/e2e/layout.test.ts` walks sign-in, the reader with the assistant, the question composer, the download dialog, the account panel, the group panel and a study session at each size with the root text doubled, and fails on any `scrollWidth` past the viewport. The keyboard is modelled as the viewport shrinking to what is left above it (55 % of the height in portrait, 45 % in landscape), at the phone's usual text size as S17.2 asks.
+  - Controls are `border-box` and never wider than their container; the reader's book and chapter selects wrap to their own line and are cut short; the questions bar and the question buttons wrap; long words break.
+  - The reader bar is sticky only on screens at least 34rem tall. On a shorter one (landscape, or the keyboard up) it scrolls away, because at 200 % text it covered the whole chapter.
+  - The note's Save button and the question composer's buttons are `position: sticky; bottom: 0`, so while the composer is on screen they sit at the bottom of what is visible.
+  - Safe-area insets pad every screen edge, checked by overriding them through the Chrome DevTools Protocol.
+- **Rejected:** scrolling the submit button into view from script when the visible area shrinks. Chromium scrolls back to the caret on every keystroke, so the button went under the keyboard again.
+- **Rejected:** an iOS Simulator run for S17.3. There is no Mac here; the CDP override checks the CSS, not Safari, and S17.4 on the owner's phones covers the real device.
+
 ### 2026-10-31 — S16: updates wait in the service worker for approval, and accounts are broadcast between windows
 - **Context:** S16 must apply a new build only when the member approves it and nothing would be cut off, hide an account in every open window when it logs out, and let anyone export their own data (DOD-27).
 - **Chosen:**
