@@ -56,7 +56,7 @@ A private Bible-study app for a small group: shared narrated reading, questions 
 
 9. **Study assistant (optional)**
 
-   The owner can ask Skynet about the passage on screen. The model runs on the owner's PC under the AgentConsole runtime; a small connector there dials out to the server, so the PC needs no open port and the server never holds model credentials. Set `ASSISTANT_OWNER_EMAIL` (only that member sees the panel) and `CONNECTOR_TOKEN` (32+ random characters) on the server. On the PC, with the Claude CLI signed in, set the same `CONNECTOR_TOKEN`, `CONNECTOR_SERVER_URL` and `AGENTCONSOLE_RUNTIME` (the runtime's `main.js`), then:
+   The owner can ask Skynet about the passage on screen. The model runs on the owner's PC under the AgentConsole runtime; a small connector there dials out to the server, so the PC needs no open port and the server never holds model credentials. Uncomment and set `ASSISTANT_OWNER_EMAIL` (only that member sees the panel) and `CONNECTOR_TOKEN` (32+ random characters) on the server. On the PC, with the Claude CLI signed in, set the same `CONNECTOR_TOKEN`, `CONNECTOR_SERVER_URL` and `AGENTCONSOLE_RUNTIME` (the runtime's `main.js`), then:
    ```bash
    npm run connector
    ```

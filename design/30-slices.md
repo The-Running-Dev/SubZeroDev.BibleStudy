@@ -296,7 +296,7 @@ Acceptance:
 Out of scope: new features.
 
 ## S18 — Hand over: setup, demo and results
-Status: todo
+Status: done
 Delivers: The owner can set up, import content, deploy, install on phones and run the demo from written instructions, and sees exactly which checks passed, which were not performed, and what is still limited.
 Touches: README and docs, `.env.example`, demo seed with synthetic users
 Depends on: S1–S17
@@ -309,4 +309,5 @@ Acceptance:
     - the import manifest identifiers;
     - remaining limitations.
   - S18.4 The demo preparation uses synthetic accounts only and sends no real invitations or reminders.
+  - Checked: S18.1 by following the README in a clean clone on 31 October 2026 against an empty database (migrations, BSB text, Romans 1 narration, `npm run demo:seed`, sign-in as a demo member through Mailpit, the shared socket). It found two setup defects, now fixed: the example `CONNECTOR_TOKEN` placeholder stopped the server, and the dev client's `/api` proxy also caught `/api.ts`, leaving a blank page; `/media/` and `/ws` were not proxied. S18.2 in `tests/unit/env-example.test.ts`, S18.3 in `docs/handover.md`, S18.4 in `tests/integration/demo.test.ts`.
 Out of scope: new features.

@@ -43,8 +43,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Everything the server answers. '/api' alone would also catch the client's own /api.ts.
     proxy: {
-      '/api': 'http://localhost:3000',
+      '^/api/': 'http://localhost:3000',
+      '/media/': 'http://localhost:3000',
+      '/ws': { target: 'ws://localhost:3000', ws: true },
       '/__build-id': 'http://localhost:3000',
     },
   },
