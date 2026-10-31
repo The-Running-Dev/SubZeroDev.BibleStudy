@@ -64,12 +64,13 @@ async function phone(viewport: { width: number; height: number }, cookie?: strin
   contexts.push(context);
   if (cookie) await context.addCookies([{ name: 'bs_session', value: cookie, url: baseUrl }]);
   const page = await context.newPage();
-  // Text at 200 %: every size in the stylesheet is in rem or em, so doubling the root size doubles all text.
+  // Text at 200 %: every size in the stylesheet is in rem or em, so doubling the root size doubles all text. Verdana,
+  // spaced out, is wider than the system font on every platform, so a layout that fits here fits Windows and Linux alike.
   if (largeText) {
     await page.addInitScript(() => {
       document.addEventListener('DOMContentLoaded', () => {
         const style = document.createElement('style');
-        style.textContent = 'html { font-size: 200% !important; }';
+        style.textContent = 'html { font-size: 200% !important; } body, button, input, select, textarea { font-family: Verdana, sans-serif !important; letter-spacing: 0.05em !important; }';
         document.head.append(style);
       });
     });

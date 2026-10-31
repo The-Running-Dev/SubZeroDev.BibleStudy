@@ -334,6 +334,8 @@ button:disabled {
 
 .chapter-nav {
   display: flex;
+  /* S17: two long chapter names at 200 % text take a line each. */
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.5rem;
   padding-top: 1rem;
