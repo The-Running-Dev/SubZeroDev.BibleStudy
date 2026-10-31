@@ -8,6 +8,19 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S12: notes and the solo position sync through one ordered change feed; the display translation lives in the study view
+- **Context:** S12 needs private notes and a solo place that no group endpoint can reach (I-21), operations applied once (I-22), and a personal display translation that leaves the group's shared one alone.
+- **Chosen:**
+  - Notes and the solo position share one `personal_changes` sequence. A push takes a per-user advisory lock, so change numbers rise in commit order and a pull cursor (the highest number seen) never skips a write. Pull reads rows and cursor in one snapshot.
+  - Every operation is recorded in `sync_operations` with its outcome; a known `opId` returns the stored outcome without applying again. An `opId` or note id another user owns is refused, never overwritten.
+  - An edit applies only on the revision it saw. A stale edit with the same text is treated as applied; with other text it becomes a `note_conflicts` row and the note is unchanged. S12 records conflicts and returns them from pull; choosing between them is S15.
+  - The reader restores the saved solo position before it saves any, then saves the place 2 s after the reader stops moving, so scrolling past a chapter writes one row, not dozens.
+  - The personal display translation is chosen in the study view and shown only there and only to that member, labelled "Your display translation"; the group's shared translation is untouched.
+  - Notes given to the assistant are chosen from the notes on the passage being read, sent as ids, and resolved on the server from the asker's own live notes; the bodies are stored in the turn's context in the order asked.
+- **Rejected:** last-write-wins on note edits. A second device's older edit would silently erase the first.
+- **Rejected:** sending note bodies with the assistant turn. The server could not tell a member's own note from text they typed, and I-21 would rest on the client.
+- **Rejected:** saving the solo position on every scroll. It floods the push queue once offline saving lands (S15).
+
 ### 2026-10-31 — S11: reminder deliveries are owed rows, reconciled each minute, and never sent late
 - **Context:** S11 needs one email per member, meeting and offset (I-07), nothing for a moved, cancelled or removed case, no duplicate after a crash, and preferences that leave login codes alone (I-08).
 - **Chosen:**

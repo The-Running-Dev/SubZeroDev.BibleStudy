@@ -290,3 +290,32 @@ describe('wrapping up', () => {
     assert.deepEqual(row.rows, [{ book_id: 'ROM', chapter: 3, verse: 1, confirmed_by: people.ruth.userId }]);
   });
 });
+
+describe('your own translation (S12.4)', () => {
+  afterEach(async () => {
+    await h.db.query('UPDATE users SET display_translation_id = NULL');
+  });
+
+  test('S12.4 Mark shows CSB for himself while the group shares BSB; Olive and the group are unchanged', async () => {
+    await h.db.query(`UPDATE groups SET shared_translation_id = 'BSB'`);
+    // Narration is imported for Romans 1 only; start there rather than where the last test left the group.
+    await h.db.query('DELETE FROM group_progress');
+    const olive = await openStudy('olive');
+    const mark = await openStudy('mark');
+    await mark.page.getByLabel('Your display translation').selectOption('CSB');
+    await mark.page.getByTestId('display-translation').getByText('Your display translation is CSB. The group reads BSB.').waitFor();
+
+    const users = await h.db.query('SELECT id, display_translation_id FROM users WHERE id = ANY($1) ORDER BY email', [[people.mark.userId, people.olive.userId]]);
+    assert.deepEqual(
+      Object.fromEntries(users.rows.map((r) => [r.id, r.display_translation_id])),
+      { [people.mark.userId]: 'CSB', [people.olive.userId]: null },
+    );
+    const group = await h.db.query('SELECT shared_translation_id FROM groups');
+    assert.deepEqual(group.rows, [{ shared_translation_id: 'BSB' }]);
+    assert.equal(await olive.page.getByTestId('display-translation').count(), 0);
+    assert.equal(await olive.page.getByLabel('Your display translation').inputValue(), '');
+
+    await mark.page.getByLabel('Your display translation').selectOption('');
+    await mark.page.getByTestId('display-translation').waitFor({ state: 'detached' });
+  });
+});

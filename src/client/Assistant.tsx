@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { AssistantEvent, AssistantStatus, AssistantTranscript, AssistantTurnView, PassageRef, TranslationId } from '../shared/api.ts';
+import type { AssistantEvent, AssistantStatus, AssistantTranscript, AssistantTurnView, NoteView, PassageRef, TranslationId } from '../shared/api.ts';
 import { terminalTurnStatuses } from '../shared/api.ts';
 import { formatReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
@@ -13,7 +13,8 @@ import { connectLive } from './live.ts';
 
 const statusEveryMs = 15_000;
 
-export function AssistantPanel(props: { translationId: TranslationId; at: PassageRef }) {
+// `notes` are the reader's own notes on this chapter; the ones they tick go with the question (S12.5).
+export function AssistantPanel(props: { translationId: TranslationId; at: PassageRef; notes: NoteView[] }) {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
 
   useEffect(() => {
@@ -32,7 +33,7 @@ export function AssistantPanel(props: { translationId: TranslationId; at: Passag
   }, []);
 
   if (!status || status.state === 'not_permitted') return null;
-  return <Conversation status={status} onStatus={setStatus} translationId={props.translationId} at={props.at} />;
+  return <Conversation status={status} onStatus={setStatus} translationId={props.translationId} at={props.at} notes={props.notes} />;
 }
 
 const isTerminal = (turn: AssistantTurnView) => terminalTurnStatuses.includes(turn.status);
@@ -62,7 +63,14 @@ function outcome(turn: AssistantTurnView): string | null {
   }
 }
 
-function Conversation(props: { status: AssistantStatus; onStatus: (status: AssistantStatus) => void; translationId: TranslationId; at: PassageRef }) {
+function Conversation(props: {
+  status: AssistantStatus;
+  onStatus: (status: AssistantStatus) => void;
+  translationId: TranslationId;
+  at: PassageRef;
+  notes: NoteView[];
+}) {
+  const [attached, setAttached] = useState<string[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurnView[]>([]);
   // Stored answers by turn, keyed by transcript position so a refetch never shows one twice.
@@ -211,15 +219,18 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
         conversation.current = id;
         setConversationId(id);
       }
-      const key = JSON.stringify([id, text, props.translationId, props.at]);
+      // Only ticked notes still on this chapter go; moving on drops the rest.
+      const noteIds = attached.filter((noteId) => props.notes.some((n) => n.id === noteId));
+      const key = JSON.stringify([id, text, props.translationId, props.at, noteIds]);
       if (pendingTurn.current?.key !== key) pendingTurn.current = { id: crypto.randomUUID(), key };
       const result = await api.sendTurn(id, {
         clientTurnId: pendingTurn.current.id,
         prompt: text,
-        context: { translationId: props.translationId, ref: props.at, noteIds: [] },
+        context: { translationId: props.translationId, ref: props.at, noteIds },
       });
       pendingTurn.current = null;
       setPrompt('');
+      setAttached([]);
       if (!turnsRef.current.some((t) => t.id === result.turnId)) showTurns([...turnsRef.current, { id: result.turnId, prompt: text, status: result.status }]);
       if (result.existing || result.status === 'failed') await refresh();
     } catch (e) {
@@ -284,6 +295,21 @@ function Conversation(props: { status: AssistantStatus; onStatus: (status: Assis
           rows={3}
           maxLength={4000}
         />
+        {props.notes.length > 0 && (
+          <fieldset className="assistant-notes">
+            <legend>Include my notes</legend>
+            {props.notes.map((note) => (
+              <label key={note.id}>
+                <input
+                  type="checkbox"
+                  checked={attached.includes(note.id)}
+                  onChange={(e) => setAttached(e.target.checked ? [...attached, note.id] : attached.filter((noteId) => noteId !== note.id))}
+                />{' '}
+                {formatReference(note.anchor)}: {note.body.length > 60 ? `${note.body.slice(0, 60)}…` : note.body}
+              </label>
+            ))}
+          </fieldset>
+        )}
         <div className="assistant-actions">
           {active ? (
             <button type="button" className="secondary" onClick={stop}>

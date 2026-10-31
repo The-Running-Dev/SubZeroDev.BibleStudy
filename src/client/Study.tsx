@@ -460,7 +460,8 @@ function StudySettings(props: { state: PlaybackState; send: (command: Command) =
 
 type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView; fallback: string | null } | { kind: 'unavailable'; message: string };
 
-// The shared passage: its text in the shared translation (BSB when that text cannot be shown), and the passage controls.
+// The shared passage: its text in the member's own display translation if they chose one (S12.4), else the shared
+// translation; BSB when that text cannot be shown. Then the passage controls.
 function StudyPassage(props: {
   state: PlaybackState;
   verse: number | null;
@@ -473,19 +474,47 @@ function StudyPassage(props: {
   const [text, setText] = useState<Text>({ kind: 'loading' });
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
+  // The member's own translation for the text; the group keeps the shared one, and the recording follows it.
+  const [display, setDisplay] = useState<TranslationId | null>(null);
+  const [displayError, setDisplayError] = useState<string | null>(null);
+  const [translations, setTranslations] = useState<TranslationView[]>([]);
+  const translationId = display ?? state.translationId;
+
+  useEffect(() => {
+    api
+      .me()
+      .then((me) => setDisplay(me.displayTranslationId))
+      .catch(() => undefined);
+    api
+      .translations()
+      .then(setTranslations)
+      .catch(() => setTranslations([]));
+  }, []);
+
+  async function chooseDisplay(next: TranslationId | null) {
+    const before = display;
+    setDisplay(next);
+    setDisplayError(null);
+    try {
+      setDisplay((await api.updateMe({ displayTranslationId: next })).displayTranslationId);
+    } catch (failure) {
+      setDisplay(before);
+      setDisplayError(messageFor(failure));
+    }
+  }
 
   useEffect(() => {
     let current = true;
     setText({ kind: 'loading' });
     api
-      .chapter(state.translationId, bookId, chapter)
+      .chapter(translationId, bookId, chapter)
       .then((c) => current && setText({ kind: 'ready', chapter: c, fallback: null }))
       .catch(async (error) => {
         if (!current) return;
-        if (state.translationId === 'BSB') return setText({ kind: 'unavailable', message: messageFor(error) });
+        if (translationId === 'BSB') return setText({ kind: 'unavailable', message: messageFor(error) });
         try {
           const c = await api.chapter('BSB', bookId, chapter);
-          if (current) setText({ kind: 'ready', chapter: c, fallback: `${state.translationId} text is not available here (${messageFor(error)}) — showing BSB.` });
+          if (current) setText({ kind: 'ready', chapter: c, fallback: `${translationId} text is not available here (${messageFor(error)}) — showing BSB.` });
         } catch (second) {
           if (current) setText({ kind: 'unavailable', message: messageFor(second) });
         }
@@ -493,7 +522,7 @@ function StudyPassage(props: {
     return () => {
       current = false;
     };
-  }, [state.translationId, bookId, chapter]);
+  }, [translationId, bookId, chapter]);
 
   function jump(event: FormEvent) {
     event.preventDefault();
@@ -524,6 +553,23 @@ function StudyPassage(props: {
           <button type="submit">Set</button>
         </form>
         {entryError && <p role="alert">{entryError}</p>}
+        <label className="display-translation">
+          Your display translation
+          <select value={display ?? ''} onChange={(e) => chooseDisplay(e.target.value === '' ? null : (e.target.value as TranslationId))}>
+            <option value="">Same as the group ({state.translationId})</option>
+            {(translations.length ? translations.map((t) => t.id) : (['BSB'] as TranslationId[])).map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </label>
+        {display !== null && display !== state.translationId && (
+          <p className="player-note" data-testid="display-translation">
+            Your display translation is {display}. The group reads {state.translationId}.
+          </p>
+        )}
+        {displayError && <p role="alert">{displayError}</p>}
       </header>
       {props.children}
       <article className="passage" aria-busy={text.kind === 'loading'}>

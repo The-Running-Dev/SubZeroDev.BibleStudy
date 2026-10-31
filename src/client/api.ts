@@ -24,6 +24,9 @@ import type {
   PostReplyRequest,
   Profile,
   ProfilePatch,
+  PullResponse,
+  PushResult,
+  SyncOp,
   QuestionStatus,
   QuestionView,
   ReplyView,
@@ -123,6 +126,10 @@ export const api = {
   confirmProgress: (groupId: string, request: ConfirmProgressRequest) => call<{ id: string }>('POST', `/api/groups/${groupId}/progress`, request),
   // The suggested stopping point and the questions to settle; also the questions the study keeps in view.
   wrapUp: (groupId: string, sessionId: string) => call<WrapUpView>('GET', `/api/groups/${groupId}/session/${sessionId}/wrap-up`),
+  // The caller's own note and solo-position operations, applied in order; each result says what became of its op.
+  push: (ops: SyncOp[]) => call<{ results: PushResult[] }>('POST', '/api/sync/push', { ops }),
+  // The caller's own notes changed after `cursor` (every live one without it), solo position and open conflicts.
+  pull: (cursor: string | null) => call<PullResponse>('GET', cursor === null ? '/api/sync/pull' : `/api/sync/pull?cursor=${encodeURIComponent(cursor)}`),
 };
 
 function postUrl(groupId: string, target: { questionId: string } | { replyId: string }): string {

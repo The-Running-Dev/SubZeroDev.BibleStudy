@@ -212,7 +212,12 @@ async function ask(cookie: string, conversationId: string, prompt = 'What does t
 }
 
 async function turnRow(turnId: string) {
-  const result = await h.db.query<{ status: AssistantTurnStatus; failure: string | null; runtime_turn_id: string | null; context: { reference: string; translationId: string; verses: { number: number; text: string }[] } }>(
+  const result = await h.db.query<{
+    status: AssistantTurnStatus;
+    failure: string | null;
+    runtime_turn_id: string | null;
+    context: { reference: string; translationId: string; verses: { number: number; text: string }[]; notes: { id: string; reference: string; body: string }[] };
+  }>(
     'SELECT status, failure, runtime_turn_id, context FROM assistant_turns WHERE id = $1',
     [turnId],
   );
@@ -325,7 +330,7 @@ describe('asking (S6.1 with a fake runtime, S6.4)', () => {
     assert.equal(second.json().error, 'turn_in_progress');
   });
 
-  test('a prompt that is empty, too long, holds NUL or carries notes is refused', async () => {
+  test('a prompt that is empty, too long or holds NUL, or names a note that is not the asker\'s, is refused', async () => {
     const { cookie } = await owner();
     await link(new FakeRuntime(), cookie);
     const id = await conversation(cookie);
@@ -342,6 +347,52 @@ describe('asking (S6.1 with a fake runtime, S6.4)', () => {
       assert.equal(response.statusCode, 400, JSON.stringify(payload).slice(0, 80));
       assert.equal(response.json().error, 'invalid_request');
     }
+  });
+
+  test('S12.5 two of the asker\'s notes go with the question: stored in the turn context and sent to the runtime', async () => {
+    const { cookie } = await owner();
+    const runtime = new FakeRuntime();
+    await link(runtime, cookie);
+    const id = await conversation(cookie);
+    const anchor = (verse: number) => ({ translationId: 'BSB', bookId: 'ROM', chapter: 1, startVerse: verse, endVerse: verse });
+    const [first, second, gone] = [randomUUID(), randomUUID(), randomUUID()];
+    const note = (entityId: string, verse: number, body: string) => ({ opId: randomUUID(), entity: 'note', entityId, op: 'upsert', baseRevision: null, anchor: anchor(verse), body, deviceId: 'd' });
+    const pushed = await api('POST', cookie, '/api/sync/push', {
+      ops: [
+        note(first, 16, 'Not ashamed.'),
+        note(second, 17, 'Faith to faith.'),
+        note(gone, 18, 'Removed.'),
+        { opId: randomUUID(), entity: 'note', entityId: gone, op: 'delete', baseRevision: 1, deviceId: 'd' },
+      ],
+    });
+    assert.equal(pushed.statusCode, 200, pushed.body);
+
+    const response = await api('POST', cookie, `/api/assistant/conversations/${id}/turns`, {
+      clientTurnId: randomUUID(),
+      prompt: 'How do my notes fit the passage?',
+      context: { ...romans(16, 17), noteIds: [second, first] },
+    });
+    assert.equal(response.statusCode, 202, response.body);
+    const { turnId } = response.json();
+    await until(async () => (await turnRow(turnId)).status === 'completed', 5000, 'the turn to complete');
+    assert.deepEqual((await turnRow(turnId)).context.notes, [
+      { id: second, reference: 'Romans 1:17', body: 'Faith to faith.' },
+      { id: first, reference: 'Romans 1:16', body: 'Not ashamed.' },
+    ]);
+    assert.match(runtime.sent[0].text, /The reader's own notes:\n- Romans 1:17: Faith to faith\.\n- Romans 1:16: Not ashamed\.\n/);
+
+    // A deleted note, an unknown one, and another member's note each refuse the whole turn.
+    const groupId = (await api('GET', cookie, '/api/groups')).json()[0].id;
+    const invite = (await api('POST', cookie, `/api/groups/${groupId}/invitations`)).json().link as string;
+    const member = await signIn(h, 'member@example.test', new URL(invite).pathname.replace('/join/', ''));
+    const theirs = randomUUID();
+    assert.equal((await api('POST', member.cookie, '/api/sync/push', { ops: [note(theirs, 16, 'Mine alone.')] })).statusCode, 200);
+    for (const noteIds of [[gone], [randomUUID()], [first, theirs], [first, first]]) {
+      const refused = await api('POST', cookie, `/api/assistant/conversations/${id}/turns`, { clientTurnId: randomUUID(), prompt: 'Why?', context: { ...romans(16, 17), noteIds } });
+      assert.equal(refused.statusCode, 400, JSON.stringify(noteIds));
+      assert.equal(refused.json().error, 'invalid_request');
+    }
+    assert.equal(runtime.sent.length, 1);
   });
 });
 

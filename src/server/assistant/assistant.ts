@@ -14,6 +14,7 @@ import { terminalTurnStatuses } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { formatReference, maxVerse } from '../../shared/reference.ts';
 import { getChapter, parseTranslationId } from '../content/catalog.ts';
+import { ownNotes } from '../personal/personal.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Config } from '../platform/config.ts';
 import type { Db } from '../platform/db.ts';
@@ -104,7 +105,11 @@ interface TurnInput {
   prompt: string;
   translationId: TranslationId;
   ref: PassageRef;
+  noteIds: string[];
 }
+
+// Notes a reader can hand the assistant with one question.
+export const maxNotesPerTurn = 20;
 
 function parseTurn(body: unknown): TurnInput {
   const b = body as Record<string, unknown> | null;
@@ -116,9 +121,12 @@ function parseTurn(body: unknown): TurnInput {
   if (prompt.includes('\u0000')) throw invalid('The question contains a character that cannot be stored.');
   const context = b.context as Record<string, unknown> | null;
   if (!context || typeof context !== 'object') throw invalid('context is { translationId, ref, noteIds }.');
-  // Notes join the context with S12.
-  if (!Array.isArray(context.noteIds) || context.noteIds.length > 0) throw invalid('Notes cannot be attached to a question yet; send noteIds: [].');
-  return { clientTurnId: b.clientTurnId, prompt, translationId: parseTranslationId(context.translationId), ref: parseRef(context.ref) };
+  const noteIds = context.noteIds;
+  if (!Array.isArray(noteIds) || noteIds.length > maxNotesPerTurn || !noteIds.every(isUuid)) {
+    throw invalid(`noteIds is a list of at most ${maxNotesPerTurn} note ids.`);
+  }
+  if (new Set(noteIds).size !== noteIds.length) throw invalid('Each note can be attached once.');
+  return { clientTurnId: b.clientTurnId, prompt, translationId: parseTranslationId(context.translationId), ref: parseRef(context.ref), noteIds };
 }
 
 // Narrows a connector message; null when its shape is wrong.
@@ -175,8 +183,20 @@ export function parseConnectorMessage(raw: unknown): ConnectorToServer | null {
   }
 }
 
-// What the runtime is asked: the rules, the passage as the reader sees it, then the question.
-export function dispatchText(prompt: string, reference: string, translationId: TranslationId, verses: { number: number; text: string }[]): string {
+export interface ContextNote {
+  id: string;
+  reference: string;
+  body: string;
+}
+
+// What the runtime is asked: the rules, the passage as the reader sees it, the reader's chosen notes, then the question.
+export function dispatchText(
+  prompt: string,
+  reference: string,
+  translationId: TranslationId,
+  verses: { number: number; text: string }[],
+  notes: ContextNote[] = [],
+): string {
   return [
     'You are a Bible study assistant answering one reader about the passage below.',
     'You have no tools. Do not try to read files, run commands or browse; answer from the passage and general knowledge.',
@@ -184,6 +204,7 @@ export function dispatchText(prompt: string, reference: string, translationId: T
     '',
     `Passage: ${reference} (${translationId})`,
     ...verses.map((v) => `${v.number} ${v.text}`),
+    ...(notes.length ? ['', "The reader's own notes:", ...notes.map((n) => `- ${n.reference}: ${n.body}`)] : []),
     '',
     `Question: ${prompt}`,
   ].join('\n');
@@ -504,7 +525,9 @@ export function createAssistant(deps: AssistantDeps): Assistant {
         .filter((v) => input.ref.startVerse === null || (v.number >= input.ref.startVerse && v.number <= (end ?? v.number)))
         .map((v) => ({ number: v.number, text: v.text }));
       const reference = formatReference(input.ref);
-      const context = { translationId: input.translationId, ref: input.ref, reference, verses, notes: [] };
+      // S12.5: only the caller's own live notes; anything else refuses the whole turn.
+      const notes: ContextNote[] = (await ownNotes(db, userId, input.noteIds)).map((n) => ({ id: n.id, reference: formatReference(n.anchor), body: n.body }));
+      const context = { translationId: input.translationId, ref: input.ref, reference, verses, notes };
 
       const turnId = uuidv7(clock.now().getTime());
       try {
@@ -535,7 +558,7 @@ export function createAssistant(deps: AssistantDeps): Assistant {
         turnId,
         conversationId,
         runtimeSessionId: conversation.runtime_session_id,
-        text: dispatchText(input.prompt, reference, input.translationId, verses),
+        text: dispatchText(input.prompt, reference, input.translationId, verses, notes),
       });
       if (!sent) {
         await transition(turnId, 'failed', 'connector_offline');

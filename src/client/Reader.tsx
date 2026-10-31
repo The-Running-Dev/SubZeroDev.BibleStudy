@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { ChapterView, PassageRef, TranslationId, TranslationView } from '../shared/api.ts';
+import type { ChapterView, NoteView, PassageRef, SoloPosition, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { api, messageFor } from './api.ts';
 import { AssistantPanel } from './Assistant.tsx';
+import { Notes, inChapter } from './Notes.tsx';
 import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
 import { ReaderQuestions } from './Questions.tsx';
@@ -12,6 +13,13 @@ import { ReaderQuestions } from './Questions.tsx';
 type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView } | { kind: 'unavailable'; message: string };
 
 const start: PassageRef = { bookId: 'ROM', chapter: 1, startVerse: null, endVerse: null };
+// The solo position is saved once the reader has stayed put this long.
+const positionDelayMs = 2_000;
+
+const positionKey = (p: SoloPosition) => `${p.translationId} ${p.bookId} ${p.chapter}:${p.verse}`;
+
+// Reading on one's own: the reader's own place (solo position), separate from any group's stopping point (S12.2),
+// and their private notes. Works with no group and with the study assistant offline (S12.1).
 
 export function Reader(props: { groupId: string | null; userId: string }) {
   const [translations, setTranslations] = useState<TranslationView[]>([]);
@@ -21,6 +29,51 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
   const [playing, setPlaying] = useState<number | null>(null);
+  const [notes, setNotes] = useState<NoteView[]>([]);
+  // Whether the saved position has come back; until then nothing is saved, so ROM 1 never overwrites it.
+  const [restored, setRestored] = useState(false);
+  const moved = useRef(false);
+  const savedPosition = useRef<string | null>(null);
+
+  function load(restore: boolean) {
+    return api.pull(null).then((personal) => {
+      setNotes(personal.notes);
+      const p = personal.soloPosition;
+      // A reader who already moved keeps their place.
+      if (restore && p && !moved.current) {
+        savedPosition.current = positionKey(p);
+        setTranslationId(p.translationId);
+        setAt({ bookId: p.bookId, chapter: p.chapter, startVerse: p.verse > 1 ? p.verse : null, endVerse: null });
+      }
+    });
+  }
+
+  useEffect(() => {
+    let current = true;
+    load(true).then(
+      () => current && setRestored(true),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+    // Once per page; `load` reads refs and setters only.
+  }, []);
+
+  const verse = playing ?? at.startVerse ?? 1;
+  useEffect(() => {
+    if (!restored) return;
+    const position: SoloPosition = { translationId, bookId: at.bookId, chapter: at.chapter, verse };
+    const key = positionKey(position);
+    if (key === savedPosition.current) return;
+    const timer = setTimeout(() => {
+      api.push([{ opId: crypto.randomUUID(), entity: 'solo_position', op: 'set', baseRevision: null, position }]).then(
+        () => (savedPosition.current = key),
+        () => undefined,
+      );
+    }, positionDelayMs);
+    return () => clearTimeout(timer);
+  }, [restored, translationId, at.bookId, at.chapter, verse]);
 
   useEffect(() => {
     api
@@ -58,7 +111,10 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   const notice = translation?.copyrightNotice;
   const previous = adjacentChapter(at, -1);
   const next = adjacentChapter(at, 1);
-  const go = (bookId: string, chapter: number) => setAt({ bookId, chapter, startVerse: null, endVerse: null });
+  const go = (bookId: string, chapter: number) => {
+    moved.current = true;
+    setAt({ bookId, chapter, startVerse: null, endVerse: null });
+  };
   const marked = (verse: number) => shown !== null && at.startVerse !== null && verse >= at.startVerse && verse <= (at.endVerse ?? at.startVerse);
 
   function jump(event: FormEvent) {
@@ -70,6 +126,7 @@ export function Reader(props: { groupId: string | null; userId: string }) {
     }
     setEntryError(null);
     setEntry('');
+    moved.current = true;
     setAt(ref);
   }
 
@@ -80,7 +137,14 @@ export function Reader(props: { groupId: string | null; userId: string }) {
           {formatReference(at)}
         </h1>
         <div className="reader-controls">
-          <select value={translationId} onChange={(e) => setTranslationId(e.target.value as TranslationId)} aria-label="Translation">
+          <select
+            value={translationId}
+            onChange={(e) => {
+              moved.current = true;
+              setTranslationId(e.target.value as TranslationId);
+            }}
+            aria-label="Translation"
+          >
             {(translations.length ? translations.map((t) => t.id) : (['BSB'] as TranslationId[])).map((id) => (
               <option key={id} value={id}>
                 {id}
@@ -130,7 +194,14 @@ export function Reader(props: { groupId: string | null; userId: string }) {
         <ReaderQuestions groupId={props.groupId} userId={props.userId} at={{ translationId, bookId: at.bookId, chapter: at.chapter }} verseCount={shown.verseCount} verse={playing ?? at.startVerse} />
       )}
 
-      <AssistantPanel translationId={translationId} at={at} />
+      <Notes
+        anchor={{ translationId, bookId: at.bookId, chapter: at.chapter, startVerse: at.startVerse, endVerse: at.startVerse === null ? null : (at.endVerse ?? at.startVerse) }}
+        notes={notes}
+        onSaved={(note) => setNotes((all) => [...all.filter((n) => n.id !== note.id), note])}
+        onReload={() => void load(false).catch(() => undefined)}
+      />
+
+      <AssistantPanel translationId={translationId} at={at} notes={inChapter(notes, at)} />
     </>
   );
 }
