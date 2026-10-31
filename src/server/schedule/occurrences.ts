@@ -21,6 +21,11 @@ export interface ScheduleDeps {
 export const windowDays = 56;
 const dayMs = 24 * 60 * 60 * 1000;
 const maxRangeMs = 366 * dayMs;
+// Meetings are kept to dates this far ahead, which also keeps every date one Intl can convert.
+const maxAheadDays = 3660;
+const isoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+const earliest = Date.UTC(2000, 0, 1);
+const latest = Date.UTC(2200, 0, 1);
 
 const invalid = (message: string) => new AppError('invalid_request', 400, message);
 const notFound = () => new AppError('not_found', 404, 'No such meeting.');
@@ -99,8 +104,8 @@ async function lockedSchedule(tx: Tx, groupId: string, mode: 'SHARE' | 'UPDATE')
 
 function instant(value: unknown, fallback: number): number {
   if (value === undefined || value === '') return fallback;
-  const ms = typeof value === 'string' ? Date.parse(value) : NaN;
-  if (Number.isNaN(ms)) throw invalid('from and to are ISO instants.');
+  const ms = typeof value === 'string' && isoInstant.test(value) ? Date.parse(value) : NaN;
+  if (Number.isNaN(ms) || ms < earliest || ms >= latest) throw invalid('from and to are ISO instants between 2000 and 2200.');
   return ms;
 }
 
@@ -164,6 +169,9 @@ export async function updateOccurrence(deps: ScheduleDeps, userId: string, group
     const localDate = (r.localDate as string | undefined) ?? row.local_date;
     const localTime = (r.localTime as string | undefined) ?? row.local_time;
     const moved = localDate !== row.local_date || localTime !== row.local_time;
+    const today = wallClock(now.getTime(), row.time_zone).localDate;
+    if (moved && localDate < addDays(today, -1)) throw invalid('A meeting can only move to a time still ahead.');
+    if (moved && localDate > addDays(today, maxAheadDays)) throw invalid('A meeting can move at most ten years ahead.');
     const startsAt = moved ? instantFor(localDate, localTime, row.time_zone) : row.starts_at.toISOString();
     if (moved && Date.parse(startsAt) <= now.getTime()) throw invalid('A meeting can only move to a time still ahead.');
     const status = (r.status as OccurrenceStatus | undefined) ?? row.status;
@@ -186,7 +194,7 @@ export async function updateOccurrence(deps: ScheduleDeps, userId: string, group
 
 // S10.3: the owner changes the weekly schedule. Meetings ahead that nobody moved follow it: on the same weekday they
 // take the new time and zone (a cancelled one stays cancelled); on another weekday they go, and the new weekday's
-// slots are made. Moved meetings keep their date and time.
+// slots are made. Moved, cancelled and planned meetings keep their date and time, and none is moved into the past.
 export async function updateSchedule(deps: ScheduleDeps, userId: string, groupId: unknown, request: unknown): Promise<GroupView> {
   await requireOwner(deps.db, userId, groupId);
   const group = groupId as string;
@@ -213,10 +221,11 @@ export async function updateSchedule(deps: ScheduleDeps, userId: string, groupId
     );
     for (const row of ahead.rows) {
       if (isoWeekday(row.slot_date) !== schedule.weekday) {
-        await tx.query('DELETE FROM occurrences WHERE id = $1', [row.id]);
+        if (row.status === 'scheduled' && row.planned_book_id === null) await tx.query('DELETE FROM occurrences WHERE id = $1', [row.id]);
         continue;
       }
       const startsAt = instantFor(row.slot_date, schedule.localTime, schedule.timeZone);
+      if (Date.parse(startsAt) <= now.getTime()) continue;
       if (row.local_time === schedule.localTime && row.time_zone === schedule.timeZone && row.starts_at.toISOString() === startsAt) continue;
       await tx.query(
         `UPDATE occurrences SET local_time = $2, time_zone = $3, starts_at = $4, revision = revision + 1, updated_by = $5, updated_at = $6 WHERE id = $1`,

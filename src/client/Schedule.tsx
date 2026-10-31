@@ -73,6 +73,8 @@ function Meeting(props: { groupId: string; meeting: OccurrenceView; onChanged: (
       if (current) {
         props.onChanged(current);
         setError('Someone changed this meeting first. Check it, then try again.');
+      } else if (failure instanceof ApiFailure && failure.body.error === 'not_found') {
+        await props.onMoved();
       } else setError(messageFor(failure));
     } finally {
       setBusy(false);
@@ -84,7 +86,12 @@ function Meeting(props: { groupId: string; meeting: OccurrenceView; onChanged: (
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const at = Date.parse(instantFor(String(form.get('date')), String(form.get('time')), viewer.timeZone));
-    void change(wallClock(at, anchor.timeZone), props.onMoved);
+    const target = wallClock(at, anchor.timeZone);
+    // The server reads a wall-clock time as its first pass; the second pass of a repeated hour cannot be named.
+    if (Date.parse(instantFor(target.localDate, target.localTime, anchor.timeZone)) !== at) {
+      return setError(`That time happens twice in ${anchor.timeZone} that night. Pick a time an hour either side.`);
+    }
+    void change(target, props.onMoved);
   }
 
   function plan(event: FormEvent<HTMLFormElement>) {
@@ -120,7 +127,7 @@ function Meeting(props: { groupId: string; meeting: OccurrenceView; onChanged: (
         </button>
       </span>
       {editing === 'move' && (
-        <form className="meeting-form" onSubmit={move}>
+        <form key={meeting.revision} className="meeting-form" onSubmit={move}>
           <label>
             Date
             <input name="date" type="date" required defaultValue={viewer.localDate} />
@@ -135,7 +142,7 @@ function Meeting(props: { groupId: string; meeting: OccurrenceView; onChanged: (
         </form>
       )}
       {editing === 'plan' && (
-        <form className="meeting-form" onSubmit={plan}>
+        <form key={meeting.revision} className="meeting-form" onSubmit={plan}>
           <label>
             Passage
             <input name="passage" defaultValue={meeting.plannedPassage ? formatReference(meeting.plannedPassage) : ''} placeholder="Romans 3" />

@@ -95,6 +95,18 @@ describe('meeting times', () => {
     await third.getByRole('button', { name: 'Restore' }).waitFor();
   });
 
+  test('a move onto the repeated hour of the meeting’s own zone is refused before it is sent', async () => {
+    const page = await openGroup(member);
+    const second = page.locator('.meetings li').nth(1);
+    await second.getByRole('button', { name: 'Move…' }).click();
+    // 09:30 in Sofia on 7 November 2027 is the second 01:30 in Chicago.
+    await second.getByLabel('Date').fill('2027-11-07');
+    await second.getByLabel('Time (GMT+2)').fill('09:30');
+    await second.getByRole('button', { name: 'Move meeting' }).click();
+    await second.getByRole('alert').getByText('That time happens twice in America/Chicago that night.', { exact: false }).waitFor();
+    assert.equal((await meetings(owner))[1].anchor.localDate, '2026-11-09');
+  });
+
   test('S10.4 a change made meanwhile is shown, not overwritten', async () => {
     const page = await openGroup(member);
     const first = page.locator('.meetings li').first();

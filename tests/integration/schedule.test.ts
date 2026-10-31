@@ -116,12 +116,34 @@ describe('S10 meeting times in each member’s zone', () => {
     assert.equal(on(after, '2026-11-16').status, 'cancelled');
     assert.equal(on(after, '2026-11-02').startsAt, '2026-11-02T13:00:00.000Z');
 
-    // Moving the day: the Mondays nobody moved give way to Tuesdays, one meeting a day.
+    // Moving the day: the Mondays nobody moved or cancelled give way to Tuesdays, one meeting a day.
     const tuesdays = await inject('PATCH', owner.cookie, `/api/groups/${groupId}/schedule`, { weekday: 2, localTime: '07:00', timeZone: 'America/Chicago' });
     assert.equal(tuesdays.statusCode, 200, tuesdays.body);
     const dates = (await meetings(owner.cookie, groupId)).map((m) => m.anchor.localDate);
-    assert.deepEqual(dates, ['2026-11-03', '2026-11-10', '2026-11-17', '2026-11-24', '2026-12-01', '2026-12-08', '2026-12-15', '2026-12-22']);
+    assert.deepEqual(dates, ['2026-11-03', '2026-11-10', '2026-11-16', '2026-11-17', '2026-11-24', '2026-12-01', '2026-12-08', '2026-12-15', '2026-12-22']);
     assert.equal(on(await meetings(owner.cookie, groupId), '2026-11-10').anchor.localTime, '07:30');
+    assert.equal(on(await meetings(owner.cookie, groupId), '2026-11-16').status, 'cancelled', 'a cancelled meeting stays as an override');
+  });
+
+  test('S10.3 a new weekday keeps a meeting with a planned passage, and no meeting is re-timed into the past', async () => {
+    const { owner, member, groupId } = await ownerAndMember();
+    const planned = await change(member.cookie, groupId, on(await meetings(member.cookie, groupId), '2026-11-09'), { plannedPassage: { bookId: 'ROM', chapter: 3 } });
+    assert.equal(planned.statusCode, 200, planned.body);
+    await inject('PATCH', owner.cookie, `/api/groups/${groupId}/schedule`, { weekday: 2, localTime: '06:15', timeZone: 'America/Chicago' });
+    const kept = on(await meetings(owner.cookie, groupId), '2026-11-09');
+    assert.deepEqual(kept.plannedPassage, { bookId: 'ROM', chapter: 3, startVerse: null, endVerse: null });
+    assert.equal(kept.anchor.localTime, '06:15');
+
+    // 06:00 in Chicago on the Monday: today's 06:15 meeting is ahead, but 05:00 would already be past.
+    await inject('PATCH', owner.cookie, `/api/groups/${groupId}/schedule`, { weekday: 1, localTime: '06:15', timeZone: 'America/Chicago' });
+    h.clock.set('2026-11-02T12:00:00Z');
+    const today = on(await meetings(owner.cookie, groupId), '2026-11-02');
+    const earlier = await inject('PATCH', owner.cookie, `/api/groups/${groupId}/schedule`, { weekday: 1, localTime: '05:00', timeZone: 'America/Chicago' });
+    assert.equal(earlier.statusCode, 200, earlier.body);
+    const after = await meetings(owner.cookie, groupId);
+    assert.equal(on(after, '2026-11-02').startsAt, '2026-11-02T12:15:00.000Z');
+    assert.equal(on(after, '2026-11-02').revision, today.revision, 'left as it was');
+    assert.equal(on(after, '2026-11-16').anchor.localTime, '05:00');
   });
 
   test('S10.3 only the owner changes the schedule, and only to a known zone', async () => {
@@ -177,6 +199,10 @@ describe('S10 meeting times in each member’s zone', () => {
     assert.equal(clash.json().error, 'invalid_request');
     const past = await change(member.cookie, groupId, list[1], { localDate: '2026-10-30' });
     assert.equal(past.statusCode, 400);
+    for (const localDate of ['9999-12-31', '0999-01-01', '2036-12-01']) {
+      const far = await change(member.cookie, groupId, list[1], { localDate });
+      assert.equal(far.statusCode, 400, `${localDate}: ${far.body}`);
+    }
 
     const off = await change(owner.cookie, groupId, list[1], { status: 'cancelled' });
     assert.equal(off.json().status, 'cancelled');
@@ -199,6 +225,9 @@ describe('S10 meeting times in each member’s zone', () => {
       range.map((m) => m.anchor.localDate),
       ['2026-11-09', '2026-11-16'],
     );
-    assert.equal((await inject('GET', owner.cookie, `/api/groups/${groupId}/occurrences?from=soon`)).statusCode, 400);
+    for (const query of ['from=soon', 'from=2026-11-05', 'from=Thu, 05 Nov 2026 00:00:00 GMT', 'from=9999-01-01T00:00:00Z&to=9999-02-01T00:00:00Z', 'to=0001-01-01T00:00:00Z']) {
+      const response = await inject('GET', owner.cookie, `/api/groups/${groupId}/occurrences?${encodeURI(query)}`);
+      assert.equal(response.statusCode, 400, `${query}: ${response.body}`);
+    }
   });
 });

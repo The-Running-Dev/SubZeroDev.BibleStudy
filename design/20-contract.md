@@ -418,7 +418,7 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `stale_revision` (409): the occurrence changed. Retry: no. Reload and reapply.
 - `invalid_zone` (400): the zone is not a known IANA name. Retry: no.
 - `invalid_request` (409): another scheduled meeting already falls on that date (a move, or a restore). Retry: no. Pick another day.
-- `invalid_request` (400): a malformed change, an empty one, a passage outside its chapter, or a move to a time already past. Retry: no.
+- `invalid_request` (400): a malformed change, an empty one, a passage that is not a chapter of the book or uses a verse number above 176 (the chapter's own verse count is checked once its text is imported, S13), a move to a time already past or more than ten years ahead, or a `from`/`to` that is not an ISO instant between 2000 and 2200. Retry: no.
 
 **content**
 - `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. Retry: no. Show the reason.
