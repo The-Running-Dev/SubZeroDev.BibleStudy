@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { CreatedInvitation, GroupView, InvitationView } from '../shared/api.ts';
 import { api, messageFor } from './api.ts';
-
-const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+import { Meetings, ScheduleForm, weekdays } from './Schedule.tsx';
 
 export function GroupPanel(props: { groupId: string; userId: string }) {
   const [group, setGroup] = useState<GroupView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped when the owner changes the schedule, so the meetings list reloads.
+  const [scheduleVersion, setScheduleVersion] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -39,6 +40,16 @@ export function GroupPanel(props: { groupId: string; userId: string }) {
       <p>
         Meets {weekdays[weekday - 1]}s at {localTime} ({timeZone}).
       </p>
+      {owner && (
+        <ScheduleForm
+          group={group}
+          onSaved={(saved) => {
+            setGroup(saved);
+            setScheduleVersion((v) => v + 1);
+          }}
+        />
+      )}
+      <Meetings groupId={group.id} version={scheduleVersion} />
       <h3>Members</h3>
       <ul className="members">
         {group.members.map((member) => (

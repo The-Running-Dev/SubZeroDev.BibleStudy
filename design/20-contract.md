@@ -150,7 +150,9 @@ interface OccurrenceView { id: Uuid; startsAt: IsoInstant; status: 'scheduled' |
 
 // GET /api/groups/:groupId/occurrences?from&to
 function listOccurrences(groupId: Uuid, range: { from: IsoInstant; to: IsoInstant }): Promise<OccurrenceView[]>;
-// member: PATCH /api/groups/:groupId/occurrences/:id  (move, cancel, plan passage)
+// member: PATCH /api/groups/:groupId/occurrences/:id  (move, cancel, plan passage). The range defaults to the next eight
+// weeks and may span at most 366 days; listing materializes the window from the schedule first. localDate and localTime
+// are in the anchor zone; the client converts a move entered in the viewer's zone with instantFor.
 function updateOccurrence(groupId: Uuid, occurrenceId: Uuid, change: { expectedRevision: number;
   localDate?: string; localTime?: string; status?: 'scheduled' | 'cancelled'; plannedPassage?: PassageRef | null }): Promise<OccurrenceView>;
 
@@ -365,7 +367,7 @@ PostgreSQL 17. Migrations are forward-only, numbered SQL files applied in a tran
 | `groups` | `id` | fk `owner_id → users` |
 | `memberships` | `(group_id, user_id)` | `role in ('owner','member')`; partial unique: one owner per group |
 | `invitations` | `id` | unique `token_hash`; `accepted_by` fk |
-| `occurrences` | `id` | unique `(group_id, local_date)` among `scheduled`; index `starts_at` |
+| `occurrences` | `id` | unique `(group_id, slot_date)`; unique `(group_id, local_date)` among `scheduled`; index `starts_at` |
 | `reminder_preferences` | `(user_id, group_id)` | `offsets_minutes` int[] each between 5 and 10080 |
 | `reminder_deliveries` | `id` | unique `(occurrence_id, occurrence_revision, user_id, offset_minutes)`; index `(status, send_after)` |
 | `email_jobs` | `id` | unique `idempotency_key`; index `(status, next_attempt_at)` |
@@ -415,6 +417,8 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 **schedule**
 - `stale_revision` (409): the occurrence changed. Retry: no. Reload and reapply.
 - `invalid_zone` (400): the zone is not a known IANA name. Retry: no.
+- `invalid_request` (409): another scheduled meeting already falls on that date (a move, or a restore). Retry: no. Pick another day.
+- `invalid_request` (400): a malformed change, an empty one, a passage outside its chapter, or a move to a time already past. Retry: no.
 
 **content**
 - `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. Retry: no. Show the reason.

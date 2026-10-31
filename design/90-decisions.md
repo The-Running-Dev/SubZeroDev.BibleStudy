@@ -8,6 +8,19 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S10: occurrences keep their schedule slot, are materialized when listed, and convert through Intl
+- **Context:** S10 needs meetings correct across both countries' clock changes with no stored offset, a schedule change that leaves members' moves and cancellations alone, and a move that cannot silently overwrite another.
+- **Chosen:**
+  - Zone math is `Intl.DateTimeFormat` over the runtime's zone data, in `src/shared/zones.ts` so the client converts a move entered in the viewer's zone exactly as the server does. A local time that occurs twice is its first occurrence; one skipped by clocks going forward is read with the offset before the change (02:30 becomes 03:30).
+  - Each occurrence keeps its `slot_date` (the schedule date it was made for, unique per group) apart from its `local_date`, so moving one never lets materializing put a second meeting in the slot it left. `moved` marks one a member moved.
+  - Listing materializes the eight-week window under a share lock on the group row; a schedule change takes the row's update lock. Materializing on read needs no worker until S11's reminder loop, which will call the same function.
+  - A schedule change re-times every future occurrence nobody moved, keeping a cancelled one cancelled, and bumps its revision. A new weekday deletes the not-moved ones on the old weekday and materializes the new ones. S11 must suppress reminders for a deleted occurrence as for a cancelled one.
+  - At most one scheduled meeting per group per local date; a move or restore onto a taken day is refused. A move to a time already past is refused.
+  - Times show in the member's profile zone with its abbreviation and, when that differs from the group's zone, the time it was set in. Dates are formatted from the wall-clock parts, never through the browser's zone.
+- **Rejected:** a materializing timer now. Nothing needs occurrences before someone looks until reminders exist.
+- **Rejected:** a third-party zone library. The runtime's zone data is what I-06 names, and it covers both zones' rules.
+- **Rejected:** regenerating moved occurrences on a schedule change. S10.3 requires overrides to survive.
+
 ### 2026-10-31 — S9: the stopping point is a confirmed chain, and a study resumes at its verse
 - **Context:** S9 needs a stopping point that only an explicit confirmation moves, two confirmations at once that do not silently overwrite each other, and carried questions that come back.
 - **Chosen:**

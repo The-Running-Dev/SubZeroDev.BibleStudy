@@ -101,14 +101,16 @@ button:disabled {
 }
 
 .members,
-.invitations {
+.invitations,
+.meetings {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .members li,
-.invitations li {
+.invitations li,
+.meetings li {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -126,6 +128,24 @@ button:disabled {
 
 .invitation-link label {
   flex: 1 1 16rem;
+}
+
+.meetings li.cancelled strong {
+  text-decoration: line-through;
+}
+
+.meeting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.meeting-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  flex-basis: 100%;
 }
 
 .account {

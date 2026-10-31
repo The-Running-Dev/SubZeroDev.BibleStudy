@@ -9,6 +9,9 @@ import type {
   GroupSummary,
   GroupView,
   InvitationView,
+  OccurrenceView,
+  ScheduleRequest,
+  UpdateOccurrenceRequest,
   ChapterView,
   RecordingsResponse,
   CodeDelivery,
@@ -74,6 +77,12 @@ export const api = {
   invitations: (groupId: string) => call<InvitationView[]>('GET', `/api/groups/${groupId}/invitations`),
   revokeInvitation: (groupId: string, invitationId: string) => call<void>('DELETE', `/api/groups/${groupId}/invitations/${invitationId}`),
   removeMember: (groupId: string, userId: string) => call<void>('DELETE', `/api/groups/${groupId}/members/${userId}`),
+  // The next eight weeks of meetings, in the member's profile zone.
+  occurrences: (groupId: string) => call<OccurrenceView[]>('GET', `/api/groups/${groupId}/occurrences`),
+  // 409 `stale_revision`, carrying the current meeting, when it changed since `expectedRevision`.
+  updateOccurrence: (groupId: string, occurrenceId: string, change: UpdateOccurrenceRequest) =>
+    call<OccurrenceView>('PATCH', `/api/groups/${groupId}/occurrences/${occurrenceId}`, change),
+  updateSchedule: (groupId: string, schedule: ScheduleRequest) => call<GroupView>('PATCH', `/api/groups/${groupId}/schedule`, schedule),
   translations: () => call<TranslationView[]>('GET', '/api/content/translations'),
   chapter: (translationId: TranslationId, bookId: string, chapter: number) => call<ChapterView>('GET', `/api/content/${translationId}/${bookId}/${chapter}`),
   // 202 while a recording is being prepared; the body lists what is ready so far.
