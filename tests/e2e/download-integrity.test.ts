@@ -175,11 +175,14 @@ before(async () => {
       }
     }
     if (url.pathname === mediaUrl) {
-      res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': audio.length });
       if (holdAudio) {
+        // Chunked, not Content-Length: some Chromium builds (seen on Windows) withhold a fixed-length body from the
+        // reader until it is complete, so the progress bar would never move.
+        res.writeHead(200, { 'content-type': 'audio/wav' });
         res.write(audio.subarray(0, Math.floor(audio.length / 2)));
         return;
       }
+      res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': audio.length });
       return void res.end(audio);
     }
     if (url.pathname.startsWith('/api/'))
