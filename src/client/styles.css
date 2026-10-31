@@ -564,3 +564,26 @@ button:disabled {
   border-left: 3px solid #9ca3af;
   white-space: pre-wrap;
 }
+
+/* S16: a new build waits for the member's approval. */
+.update-ready {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: max(0.5rem, env(safe-area-inset-top)) 1rem 0.5rem;
+  background: var(--accent);
+  color: #fff;
+}
+
+.update-ready button {
+  background: #fff;
+  color: var(--accent);
+}
+
+.update-refused {
+  flex-basis: 100%;
+}

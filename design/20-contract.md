@@ -307,6 +307,7 @@ function pull(cursor: string | null): Promise<{ notes: NoteView[]; soloPosition:
 // changed again since the conflict keeps both instead, so no saved text is lost.
 function resolveConflict(conflictId: Uuid, choice: 'kept_server' | 'kept_incoming' | 'kept_both'): Promise<NoteView[]>;
 // GET /api/export — the user's own profile, notes, solo position, questions and replies they authored, conversations
+// (prompts and transcript text), as a JSON attachment read in one snapshot. No other member's posts, no runtime ids.
 function exportPersonal(): Promise<Blob>;
 ```
 
@@ -366,6 +367,8 @@ function sync(userId: Uuid): Promise<{ notes: (NoteView & { pending: boolean })[
 // drafts.ts: a question draft per member, group and chapter, with the clientOpId its post will use (a new one with every
 // edit). Resolves once stored. Never sent on its own.
 function saveDraft(draft: { userId: Uuid; id: string; groupId: Uuid; verses: string; body: string; clientOpId: Uuid }): Promise<void>;
+// shell.ts: a new build waits as a service worker. live_session and signing_in are held by the page; the waiting worker
+// counts the app's windows and calls skipWaiting only when there is one, and the page reloads once it takes over.
 function switchAccount(nextUserId: Uuid | null): Promise<void>;   // broadcasts to every window
 function requestUpdate(): Promise<{ applied: true } | { applied: false; reason: 'live_session' | 'signing_in' | 'multiple_windows' }>;
 ```
