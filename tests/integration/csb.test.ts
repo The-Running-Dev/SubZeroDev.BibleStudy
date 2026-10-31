@@ -13,7 +13,7 @@ const bibleId = 'csb-fixture';
 const copyright = 'Synthetic copyright notice for tests.';
 const day = 24 * 60 * 60 * 1000;
 
-let mode: 'ok' | 'missing-key' | 'bad-key' | 'down' = 'ok';
+let mode: 'ok' | 'missing-key' | 'bad-key' | 'down' | 'limited' | 'no-chapter' = 'ok';
 let served = 0;
 const requests: string[] = [];
 let api: Server;
@@ -23,12 +23,13 @@ let savedNotice: string;
 
 function answer(url: URL, headers: Record<string, string | string[] | undefined>): [number, unknown] {
   if (mode === 'down') return [503, { message: 'unavailable' }];
+  if (mode === 'limited') return [429, { message: 'Too many requests' }];
   // Recorded 2026-10-31: no key is 401, an unknown key is 403 with this body.
   if (mode === 'missing-key') return [401, { statusCode: 401, error: 'Unauthorized', message: 'Missing API key' }];
   if (mode === 'bad-key' || headers['api-key'] !== fixtureKey) return [403, { statusCode: 403, error: 'Forbidden', message: 'Invalid API key' }];
   if (url.pathname === `/v1/bibles/${bibleId}`) return [200, { data: { id: bibleId, abbreviation: 'CSB' } }];
   const match = new RegExp(`^/v1/bibles/${bibleId}/chapters/([1-3A-Z]{3})\\.(\\d+)$`).exec(url.pathname);
-  if (!match) return [404, { message: 'not found' }];
+  if (!match || mode === 'no-chapter') return [404, { message: 'not found' }];
   const id = `${match[1]}.${match[2]}`;
   served += 1;
   const verse = (n: number, value: string) => [
@@ -160,6 +161,47 @@ describe('CSB from API.Bible (S13)', () => {
     assert.equal(expired.json().error, 'translation_unavailable');
     assert.equal(expired.json().message, 'API.Bible could not be reached; try again later');
     assert.equal((await h.db.query(`SELECT 1 FROM chapters WHERE translation_id = 'CSB'`)).rowCount, 0);
+  });
+
+  const chapterCalls = () => requests.filter((r) => r.includes('/chapters/')).length;
+
+  test('S13.4 a chapter API.Bible lacks fails alone, and is not asked for again for a minute', async () => {
+    mode = 'no-chapter';
+    const missing = await get('/api/content/CSB/ROM/1');
+    assert.equal(missing.statusCode, 409);
+    assert.match(missing.json().message, /does not offer this Bible/);
+    assert.equal((await get('/api/content/CSB/ROM/1')).statusCode, 409);
+    assert.equal(chapterCalls(), 1);
+    assert.deepEqual((await csbOf()).availability, { state: 'available' });
+
+    mode = 'ok';
+    assert.equal((await get('/api/content/CSB/ROM/2')).statusCode, 200);
+    assert.equal((await get('/api/content/CSB/ROM/1')).statusCode, 409);
+    h.clock.advance(61_000);
+    assert.equal((await get('/api/content/CSB/ROM/1')).statusCode, 200);
+    assert.equal(chapterCalls(), 3);
+  });
+
+  test('S13.4 the request limit holds for every chapter for a minute', async () => {
+    mode = 'limited';
+    const limited = await get('/api/content/CSB/ROM/1');
+    assert.equal(limited.statusCode, 409);
+    assert.equal(limited.json().message, "API.Bible's request limit was reached; try again later");
+    assert.equal((await get('/api/content/CSB/ROM/2')).json().message, "API.Bible's request limit was reached; try again later");
+    assert.equal(chapterCalls(), 1);
+    assert.equal((await csbOf()).availability.state, 'unavailable');
+
+    mode = 'ok';
+    h.clock.advance(61_000);
+    assert.equal((await get('/api/content/CSB/ROM/2')).statusCode, 200);
+    assert.equal(chapterCalls(), 2);
+  });
+
+  test('S13.4 readers asking for one chapter at once share a single request', async () => {
+    const answers = await Promise.all([1, 2, 3].map(() => get('/api/content/CSB/ROM/1')));
+    assert.deepEqual(answers.map((a) => a.statusCode), [200, 200, 200]);
+    assert.equal(chapterCalls(), 1);
+    assert.equal(new Set(answers.map((a) => a.json().fums.token)).size, 1);
   });
 
   test('S13.5 CSB narration is unavailable: no licensed CSB recording', async () => {

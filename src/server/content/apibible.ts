@@ -88,7 +88,8 @@ export function normalizeApiChapter(nodes: ApiNode[], bookId: string, chapter: n
   const texts = new Map<number, string>();
   const headings: ChapterContent['headings'] = [];
   let pending: string[] = [];
-  const idPattern = new RegExp(`^${bookId}\\.${chapter}\\.(\\d+)$`);
+  // A bridged verse (ROM.3.1-2, or ROM.3.1-ROM.3.2) is kept under its first number.
+  const idPattern = new RegExp(`^${bookId}\\.${chapter}\\.(\\d+)(?:-(?:${bookId}\\.${chapter}\\.)?\\d+)?$`);
 
   const visit = (node: ApiNode, breakBefore: string): string => {
     if (node.type === 'text') {
@@ -136,7 +137,10 @@ interface ChapterResponse {
 
 export function createApiBible(settings: ApiBibleSettings, clock: Clock, options: { timeoutMs?: number } = {}): ApiBible {
   const base = settings.baseUrl.replace(/\/+$/, '');
-  let known: { availability: Availability; until: number } | null = null;
+  // The error is kept when the whole Bible is unavailable, so chapter requests are refused without asking again.
+  let known: { availability: Availability; until: number; error?: ApiBibleError } | null = null;
+  // A chapter API.Bible could not supply is not asked for again until the failure expires.
+  const missing = new Map<string, { error: ApiBibleError; until: number }>();
   // Concurrent readers of one chapter share a single request.
   const inFlight = new Map<string, Promise<FetchedChapter>>();
 
@@ -162,16 +166,17 @@ export function createApiBible(settings: ApiBibleSettings, clock: Clock, options
     }
   }
 
-  function remember(availability: Availability, forMs: number): Availability {
-    known = { availability, until: clock.now().getTime() + forMs };
+  function remember(availability: Availability, forMs: number, error?: ApiBibleError): Availability {
+    known = { availability, until: clock.now().getTime() + forMs, error };
     return availability;
   }
 
-  // A rejected key or a missing Bible found by a chapter request also answers the next status question.
-  function noteFailure(error: unknown): void {
-    if (error instanceof ApiBibleError && (error.kind === 'rejected' || error.kind === 'not_found')) {
-      remember({ state: 'unavailable', reason: failureReason(error) }, statusFailedMs);
-    }
+  // A refused key, the request limit or an outage holds for the whole Bible and answers the next status question too.
+  // A chapter that is missing or unreadable holds for that chapter only; whether the Bible exists is the probe's answer.
+  function noteFailure(key: string, error: unknown): void {
+    if (!(error instanceof ApiBibleError)) return;
+    if (error.kind === 'not_found' || error.kind === 'malformed') missing.set(key, { error, until: clock.now().getTime() + statusFailedMs });
+    else remember({ state: 'unavailable', reason: failureReason(error) }, statusFailedMs, error);
   }
 
   async function fetchChapter(bookId: string, chapter: number): Promise<FetchedChapter> {
@@ -196,12 +201,17 @@ export function createApiBible(settings: ApiBibleSettings, clock: Clock, options
         return remember({ state: 'available' }, statusOkMs);
       } catch (error) {
         if (!(error instanceof ApiBibleError)) throw error;
-        return remember({ state: 'unavailable', reason: failureReason(error) }, statusFailedMs);
+        return remember({ state: 'unavailable', reason: failureReason(error) }, statusFailedMs, error);
       }
     },
 
     chapter(bookId, chapter) {
       const key = `${bookId}.${chapter}`;
+      const now = clock.now().getTime();
+      if (known?.error && now < known.until) return Promise.reject(known.error);
+      const failed = missing.get(key);
+      if (failed && now < failed.until) return Promise.reject(failed.error);
+      if (failed) missing.delete(key);
       const running = inFlight.get(key);
       if (running) return running;
       const request = fetchChapter(bookId, chapter)
@@ -210,7 +220,7 @@ export function createApiBible(settings: ApiBibleSettings, clock: Clock, options
           return fetched;
         })
         .catch((error: unknown) => {
-          noteFailure(error);
+          noteFailure(key, error);
           throw error;
         })
         .finally(() => inFlight.delete(key));

@@ -183,6 +183,14 @@ describe('S13 normalizing API.Bible chapters', () => {
     });
   });
 
+  test('a bridged verse is kept under its first number', () => {
+    const nodes = [para('p', [verse(1), text('Joined text ', 'ROM.1.1-2'), text('and more.', 'ROM.1.1-ROM.1.2'), verse(3), text('Third.', 'ROM.1.3')])];
+    assert.deepEqual(normalizeApiChapter(nodes, 'ROM', 1).verses, [
+      { number: 1, text: 'Joined text and more.' },
+      { number: 3, text: 'Third.' },
+    ]);
+  });
+
   test('a chapter with no verse text normalizes to no verses', () => {
     assert.deepEqual(normalizeApiChapter([para('p', [{ type: 'text', text: 'untagged' }])], 'ROM', 1).verses, []);
   });

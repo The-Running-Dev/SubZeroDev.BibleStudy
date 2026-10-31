@@ -531,7 +531,9 @@ export function createAssistant(deps: AssistantDeps): Assistant {
       const reference = formatReference(input.ref);
       // S12.5: only the caller's own live notes; anything else refuses the whole turn.
       const notes: ContextNote[] = (await ownNotes(db, userId, input.noteIds)).map((n) => ({ id: n.id, reference: formatReference(n.anchor), body: n.body }));
-      const context = { translationId: input.translationId, ref: input.ref, reference, verses, notes };
+      // I-11: CSB text may not outlive its 14-day copy, so a CSB turn records which verses it was about, not their text.
+      const kept = input.translationId === 'CSB' ? verses.map((v) => ({ number: v.number })) : verses;
+      const context = { translationId: input.translationId, ref: input.ref, reference, verses: kept, notes };
 
       const turnId = uuidv7(clock.now().getTime());
       try {

@@ -62,6 +62,12 @@ describe('loadConfig', () => {
     assert.equal(loadConfig({ ...base, APIBIBLE_KEY: 'k', APIBIBLE_CSB_BIBLE_ID: 'csb-id', APIBIBLE_BASE_URL: 'http://127.0.0.1:9/v1/' }).apibible?.baseUrl, 'http://127.0.0.1:9/v1');
     assert.throws(() => loadConfig({ ...base, APIBIBLE_KEY: 'k' }), /APIBIBLE_CSB_BIBLE_ID is required when APIBIBLE_KEY is set/);
     assert.throws(() => loadConfig({ ...base, APIBIBLE_KEY: 'replace-with-your-api-bible-key', APIBIBLE_CSB_BIBLE_ID: 'csb-id' }), /APIBIBLE_KEY is still the example placeholder/);
+    for (const url of ['http://api.example.test/v1', 'ftp://127.0.0.1/v1', 'not a url']) {
+      assert.throws(() => loadConfig({ ...base, APIBIBLE_KEY: 'k', APIBIBLE_CSB_BIBLE_ID: 'csb-id', APIBIBLE_BASE_URL: url }), /APIBIBLE_BASE_URL must be an https URL/, url);
+    }
+    assert.equal(loadConfig({ ...base, APIBIBLE_KEY: 'k', APIBIBLE_CSB_BIBLE_ID: 'csb-id', APIBIBLE_BASE_URL: 'http://localhost:9/v1' }).apibible?.baseUrl, 'http://localhost:9/v1');
+    assert.throws(() => loadConfig({ ...base, APIBIBLE_CSB_BIBLE_ID: 'csb-id' }), /APIBIBLE_CSB_BIBLE_ID is set without APIBIBLE_KEY/);
+    assert.equal(loadConfig({ ...base, APIBIBLE_BASE_URL: 'https://rest.api.bible/v1' }).apibible, null);
   });
 
   test('names every missing or weak variable', () => {

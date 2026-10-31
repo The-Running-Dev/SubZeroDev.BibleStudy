@@ -81,8 +81,10 @@ async function readCsb(): Promise<void> {
   await page.getByText('Synthetic fixture verse.').waitFor();
 }
 
+// Waits for the reports, then a little longer, so a report sent twice is caught too.
 async function eventuallyReported(count: number): Promise<void> {
   for (let i = 0; i < 50 && reports.length < count; i++) await page.waitForTimeout(100);
+  await page.waitForTimeout(500);
   assert.equal(reports.length, count);
 }
 
@@ -116,6 +118,23 @@ describe('Fair Use reporting (S13.6)', () => {
     assert.deepEqual(reports[0].searchParams.getAll('t'), ['token-ROM.1']);
     for (let i = 0; i < 50 && (await queued()).length > 0; i++) await page.waitForTimeout(100);
     assert.deepEqual(await queued(), []);
+    await page.context().close();
+  });
+
+  test('S13.6 storage that refuses the queue: each report still goes out once, and the stale stored queue is dropped', async () => {
+    await page.addInitScript(() => {
+      localStorage.setItem('fums-queue', JSON.stringify([{ token: 'token-earlier', userId: 'earlier-user' }]));
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+        if (key === 'fums-queue') throw new DOMException('full', 'QuotaExceededError');
+        setItem.call(this, key, value);
+      };
+    });
+    await page.reload();
+    await readCsb();
+    await eventuallyReported(2);
+    assert.deepEqual(reports.map((r) => r.searchParams.getAll('t')).sort(), [['token-ROM.1'], ['token-earlier']]);
+    assert.equal(await page.evaluate(() => localStorage.getItem('fums-queue')), null);
     await page.context().close();
   });
 });

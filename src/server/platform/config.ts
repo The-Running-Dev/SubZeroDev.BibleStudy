@@ -81,7 +81,20 @@ export function loadConfig(env: Env = process.env): Config {
     if (apibibleKey.startsWith('replace-with')) problems.push('APIBIBLE_KEY is still the example placeholder');
     if (!bibleId || bibleId.startsWith('replace-with')) problems.push('APIBIBLE_CSB_BIBLE_ID is required when APIBIBLE_KEY is set');
     const baseUrl = (env.APIBIBLE_BASE_URL?.trim() || 'https://rest.api.bible/v1').replace(/\/+$/, '');
+    // The key travels in a header: never over plain http, except to a stand-in on this machine.
+    let parsed: URL | null;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      parsed = null;
+    }
+    const local = parsed !== null && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    if (!parsed || !(parsed.protocol === 'https:' || (parsed.protocol === 'http:' && local))) {
+      problems.push('APIBIBLE_BASE_URL must be an https URL (http only for localhost)');
+    }
     config.apibible = { key: apibibleKey, bibleId, baseUrl };
+  } else if (env.APIBIBLE_CSB_BIBLE_ID?.trim()) {
+    problems.push('APIBIBLE_CSB_BIBLE_ID is set without APIBIBLE_KEY');
   }
 
   if (config.appSecret && config.appSecret.length < 32) problems.push('APP_SECRET must be at least 32 characters');

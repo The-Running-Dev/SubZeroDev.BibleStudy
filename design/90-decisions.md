@@ -15,6 +15,8 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
   - Expired CSB rows are deleted before any refetch, so the 14-day limit holds even when API.Bible is down. A fetch that fails answers 409 `translation_unavailable` with the reason (S13.4), not `upstream_failed`.
   - 401 and 403 both mean "API.Bible rejected the key" (recorded: no key is 401, an unknown key is 403). 404 means the Bible id is wrong or CSB access is not granted; 429 is the request limit.
   - Availability probes `GET /bibles/{id}`; a success stands for an hour and a failure for a minute, so the translations list does not spend the 5,000 monthly calls.
+  - A refused key, the request limit or an outage makes the whole Bible unavailable for a minute, and chapter reads are refused without calling API.Bible. A chapter API.Bible lacks fails alone, for a minute.
+  - An assistant turn on CSB records the verse numbers it was about, not their text, so no CSB text outlives its 14-day copy in `assistant_turns`.
   - The copyright notice shown under CSB is the one API.Bible sends with the text; it replaces the seeded notice.
   - Fair Use: on each display the browser calls `https://fums.api.bible/f3?t=<token>&dId=<device>&sId=<session>&uId=<sha256 of user id>`, the v3 format in https://docs.api.bible/guides/fair-use. Reports wait in `localStorage` while the call fails and go out on the `online` event, at most 20 tokens per call and 500 held.
 - **Rejected:** reporting Fair Use from the server. The call is meant to come from the device that shows the text, and offline displays would never reach the server.
