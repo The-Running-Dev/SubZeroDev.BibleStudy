@@ -28,12 +28,22 @@ These are account and server settings, so they are the owner's to make. Nothing 
 2. **The proxy network exists** on the VPS. The stack expects `proxy-net`; set `PROXY_NETWORK` if yours is named differently. It is declared external, so the stack fails to start rather than create a network the proxy cannot reach.
 3. **The hostname resolves and is routed.** Add the DNS record (proposed: `biblestudy.subzerodev.com`) and a proxy route from it to `http://biblestudy-app:3000`, with TLS terminated at the proxy. The route must pass WebSocket upgrades (`/ws`, `/connector`).
 4. **Create the stack in Portainer:** Stacks → Add stack → Repository. Repository URL `https://github.com/The-Running-Dev/SubZeroDev.BibleStudy`, reference `refs/heads/main`, compose path `compose.yaml`. Set the environment variables below. Turn on the stack webhook and copy its URL.
-5. **Turn on automatic deploys:** in the repository's Settings → Secrets and variables → Actions, add the secret `PORTAINER_REDEPLOY_WEBHOOK_URL` with the webhook URL, and the variable `DEPLOY_ENABLED` = `true`. Until both exist, a merge only publishes the image.
+5. **Turn on automatic deploys:** in the repository's Settings → Secrets and variables → Actions, add the secret `PORTAINER_REDEPLOY_WEBHOOK_URL` with the webhook URL, and the variable `DEPLOY_ENABLED` = `true`. Until both exist, a merge only publishes the image. Add the variable `PUBLIC_URL` = `https://<hostname>` too, and the deploy waits up to five minutes for the site to serve the merged commit, failing if it does not.
 6. **Import the text** once the stack is up, from the VPS shell:
 
    ```bash
    docker exec "$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)" node src/server/content/import-cli.ts --translation BSB
    ```
+7. **Import CSB** from the owner's files, if you hold them. They are licensed text, so they are never in git or the image. Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
+
+   ```bash
+   app="$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)"
+   docker cp /tmp/CSB "$app":/tmp/CSB
+   docker exec "$app" node src/server/content/import-cli.ts --translation CSB --from /tmp/CSB
+   docker exec -u 0 "$app" rm -rf /tmp/CSB && rm -rf /tmp/CSB
+   ```
+
+   The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed. CSB is copyrighted: serving it on a public site, even behind sign-in, needs the owner's licence (D-2026-11-01 in [the decision log](../design/90-decisions.md)).
 
 ## Environment variables
 
@@ -55,6 +65,8 @@ Set these in the Portainer stack (or a git-ignored `.env` next to `compose.yaml`
 | `BACKUP_DIR` | no | A host path for the backups instead of the `backups` volume, so the host's own off-site sync can pick them up. It must be writable by uid 1000. |
 
 ## Checking a deploy
+
+Every merge to main builds the image, runs [the drill](#the-drill) on that exact image, and only then publishes it as `:<sha>` and `:latest`, so an image that fails the drill never reaches the VPS. With `PUBLIC_URL` set, the deploy job then runs `scripts/verify-deploy.ts`, which does the check below until it passes.
 
 `GET https://<hostname>/__build-id` returns `{"buildId":"<commit sha>"}` for the commit the image was built from. Compare it with the merge commit. In Portainer every long-running service (`db`, `biblestudy`, `backup`) shows healthy; `migrate` shows exited (0).
 

@@ -146,7 +146,7 @@ describe('the reader', () => {
   test('S2.7 choosing CSB says it is not available and shows no text', async () => {
     await expectReference('Romans 1');
     await page.getByLabel('Translation').selectOption('CSB');
-    await page.getByText("CSB needs the owner's API.Bible key (APIBIBLE_KEY).").waitFor();
+    await page.getByText("CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY).").waitFor();
     assert.equal(await page.locator('.verse').count(), 0);
     await page.getByLabel('Translation').selectOption('BSB');
     await expectReference('Romans 1');

@@ -501,7 +501,7 @@ describe('S14 download integrity and offline browser regressions', () => {
     }
   });
 
-  test('CSB without an expiration is refused instead of kept indefinitely', async () => {
+  test("CSB without an expiration (imported from the owner's files) is kept offline", async () => {
     const context = await browser.newContext(mobile);
     try {
       expiresAt = null;
@@ -509,8 +509,8 @@ describe('S14 download integrity and offline browser regressions', () => {
       await page.getByLabel('Translation', { exact: true }).selectOption('CSB');
       await page.locator('.verse').first().waitFor();
       await start(page, false);
-      await page.getByText(/Download failed — This download has expired/).waitFor();
-      assert.deepEqual((await stored(page)).downloads, []);
+      await page.getByText('Downloaded — readable offline.').waitFor();
+      assert.equal((await stored(page)).downloads.length, 1);
     } finally {
       await context.close();
     }

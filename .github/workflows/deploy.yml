@@ -41,22 +41,37 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      # :<sha> is what a rollback pins; :latest is what compose.yaml pulls by default.
-      - name: Build and push
+      # Built into the local daemon, not pushed: the exact image is drilled before anything is published.
+      - name: Build
         uses: docker/build-push-action@v6
         with:
           context: .
           target: runtime
-          push: true
+          load: true
           build-args: BUILD_ID=${{ github.sha }}
-          tags: |
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      # The same drill CI runs, on the image about to be published: compose.yaml with stack.env.example's
+      # values, /__build-id, data surviving down/up, backup and restore, and a failed migration.
+      - name: Drill the image before publishing
+        run: node scripts/drill-stack.ts --image "$IMAGE:$GITHUB_SHA"
+
+      # :<sha> is what a rollback pins; :latest is what compose.yaml pulls by default.
+      - name: Publish the drilled image
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
+          docker push "$IMAGE:latest"
 
   deploy:
     name: deploy
@@ -73,3 +88,19 @@ jobs:
           test -n "$REDEPLOY_WEBHOOK_URL" || { echo "PORTAINER_REDEPLOY_WEBHOOK_URL is not set"; exit 1; }
           curl -fsS --max-time 60 -X POST "$REDEPLOY_WEBHOOK_URL" -o /dev/null
           echo "Redeploy requested for ${{ github.sha }}"
+
+      - name: Checkout
+        if: vars.PUBLIC_URL != ''
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        if: vars.PUBLIC_URL != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      # Set the repository variable PUBLIC_URL (https://<hostname>) to have the deploy wait for the site to
+      # serve this commit; without it the deploy ends once Portainer accepts the webhook.
+      - name: Verify the site serves this build
+        if: vars.PUBLIC_URL != ''
+        run: node scripts/verify-deploy.ts "${{ vars.PUBLIC_URL }}" "$GITHUB_SHA"

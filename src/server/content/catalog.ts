@@ -9,13 +9,17 @@ import type { ApiBible } from './apibible.ts';
 import { narrationAvailability } from './narration.ts';
 import { contentHash, serializeContent } from './normalize.ts';
 
-// CSB comes only from API.Bible (I-11). Null when the owner has not set APIBIBLE_KEY.
+// CSB is the owner's imported text, and API.Bible for any chapter not imported (I-11). Null when the owner has not
+// set APIBIBLE_KEY.
 export interface Csb {
   api: ApiBible;
   clock: Clock;
 }
 
-export const csbNotConfigured: Availability = { state: 'not_configured', reason: "CSB needs the owner's API.Bible key (APIBIBLE_KEY)." };
+export const csbNotConfigured: Availability = {
+  state: 'not_configured',
+  reason: "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY).",
+};
 const bsbNotImported: Availability = { state: 'unavailable', reason: 'BSB text has not been imported yet. Run import-content --translation BSB.' };
 
 export function parseTranslationId(input: unknown): TranslationId {
@@ -23,8 +27,17 @@ export function parseTranslationId(input: unknown): TranslationId {
   throw new AppError('invalid_request', 400, 'translation is BSB or CSB.');
 }
 
+// An imported CSB chapter never expires; a cached API.Bible one does.
+async function csbImported(db: Queryable): Promise<boolean> {
+  const result = await db.query(`SELECT 1 FROM chapters WHERE translation_id = 'CSB' AND expires_at IS NULL LIMIT 1`);
+  return Boolean(result.rowCount);
+}
+
 async function textAvailability(db: Queryable, translationId: TranslationId, csb: Csb | null): Promise<Availability> {
-  if (translationId === 'CSB') return csb ? csb.api.status() : csbNotConfigured;
+  if (translationId === 'CSB') {
+    if (await csbImported(db)) return { state: 'available' };
+    return csb ? csb.api.status() : csbNotConfigured;
+  }
   const result = await db.query('SELECT 1 FROM chapters WHERE translation_id = $1 LIMIT 1', [translationId]);
   return result.rowCount ? { state: 'available' } : bsbNotImported;
 }
@@ -52,8 +65,9 @@ export async function listTranslations(db: Queryable, csb: Csb | null): Promise<
 export async function listBooks(db: Queryable, translationId: TranslationId, csb: Csb | null): Promise<BookView[]> {
   const availability = await textAvailability(db, translationId, csb);
   if (availability.state !== 'available') throw unavailable(availability);
-  // CSB is fetched a chapter at a time, so it has no imported book rows; its canon is the shared one.
-  if (translationId === 'CSB') return books.map((b) => ({ bookId: b.id, name: b.name, chapters: b.chapters }));
+  // With API.Bible, any CSB chapter can be fetched, so its canon is the shared one; without it, only the books
+  // the owner imported can be read.
+  if (translationId === 'CSB' && csb) return books.map((b) => ({ bookId: b.id, name: b.name, chapters: b.chapters }));
   const result = await db.query<BookView>(
     'SELECT book_id AS "bookId", name, chapters FROM books WHERE translation_id = $1 ORDER BY book_order',
     [translationId],
@@ -80,10 +94,30 @@ interface ChapterRow {
 
 const selectChapter = 'SELECT verse_count, content, content_sha256, expires_at, fums_token FROM chapters WHERE translation_id = $1 AND book_id = $2 AND chapter = $3';
 
-// I-11: a stored CSB chapter is served only before its expiry. Expired copies are deleted first, so the licence's
-// 14-day limit holds even when the refetch fails; a missing or expired chapter is fetched from API.Bible.
+// I-11: an imported CSB chapter is always served. A cached API.Bible chapter is served only before its expiry;
+// expired copies are deleted first, so the licence's 14-day limit holds even when the refetch fails, and a missing
+// or expired chapter is fetched from API.Bible.
 async function csbChapter(db: Queryable, csb: Csb | null, bookId: string, chapter: number): Promise<ChapterRow> {
-  if (!csb) throw unavailable(csbNotConfigured);
+  if (!csb) {
+    const imported = await db.query<ChapterRow>(`${selectChapter} AND expires_at IS NULL`, ['CSB', bookId, chapter]);
+    if (imported.rows[0]) return imported.rows[0];
+    throw unavailable((await csbImported(db)) ? { state: 'unavailable', reason: 'This CSB chapter has not been imported.' } : csbNotConfigured);
+  }
+  // Readers asking for one chapter at once share the lookup, fetch and store. Sharing only the fetch let a reader
+  // whose lookup ran before the first one stored the chapter, but whose fetch started after it, fetch again.
+  const running = loading.get(csb) ?? new Map<string, Promise<ChapterRow>>();
+  loading.set(csb, running);
+  const key = `${bookId}.${chapter}`;
+  const shared = running.get(key);
+  if (shared) return shared;
+  const load = loadCsbChapter(db, csb, bookId, chapter).finally(() => running.delete(key));
+  running.set(key, load);
+  return load;
+}
+
+const loading = new WeakMap<Csb, Map<string, Promise<ChapterRow>>>();
+
+async function loadCsbChapter(db: Queryable, csb: Csb, bookId: string, chapter: number): Promise<ChapterRow> {
   await db.query(`DELETE FROM chapters WHERE translation_id = 'CSB' AND expires_at <= $1`, [csb.clock.now()]);
   const stored = await db.query<ChapterRow>(selectChapter, ['CSB', bookId, chapter]);
   if (stored.rows[0]) return stored.rows[0];
@@ -104,12 +138,14 @@ async function csbChapter(db: Queryable, csb: Csb | null, bookId: string, chapte
      ON CONFLICT (translation_id, book_id, chapter) DO UPDATE SET verse_count = EXCLUDED.verse_count, content = EXCLUDED.content,
        content_sha256 = EXCLUDED.content_sha256, source_ref = EXCLUDED.source_ref, fetched_at = EXCLUDED.fetched_at,
        expires_at = EXCLUDED.expires_at, fums_token = EXCLUDED.fums_token
+     WHERE chapters.expires_at IS NOT NULL
      RETURNING verse_count, content, content_sha256, expires_at, fums_token`,
     [bookId, chapter, fetched.verseCount, content, contentHash(content), fetched.sourceRef, fetchedAt, new Date(fetchedAt.getTime() + csbCacheMs), fetched.fumsToken],
   );
   // The notice shown under CSB text is the one API.Bible sends with it.
   if (fetched.copyright) await db.query(`UPDATE translations SET copyright_notice = $1 WHERE id = 'CSB' AND copyright_notice <> $1`, [fetched.copyright]);
-  return row.rows[0];
+  // A chapter imported while this one was being fetched is kept, and served instead.
+  return row.rows[0] ?? (await db.query<ChapterRow>(selectChapter, ['CSB', bookId, chapter])).rows[0];
 }
 
 export async function getChapter(db: Queryable, translationId: TranslationId, bookId: string, chapter: number, csb: Csb | null): Promise<StoredChapter> {

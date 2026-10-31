@@ -6,8 +6,26 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - Which real phones run the device checks (DOD-23, DOD-28, DOD-29).
 - Whether `biblestudy.subzerodev.com` is the hostname, and who adds its DNS record and proxy route.
 - The owner's status page is promised (10-design failure modes, the contract's mail errors, D-2026-10-30-15) but not built. Escalated to `/plan` for a slice.
+- Whether the owner's CSB licence covers serving the imported text on the public site behind sign-in (2026-11-01). The code imports it; the licence is the owner's to confirm.
 
 ---
+
+### 2026-11-01 — Deploy as SubZeroDev.Adventures does, with its two checks
+- **Context:** The owner asked to deploy the way SubZeroDev.Adventures does. Both already publish to GHCR and redeploy a Portainer Git stack by webhook. Adventures also tests the exact image before publishing it, and after the redeploy waits for the site to serve the new revision; BibleStudy did neither.
+- **Chosen:** `deploy.yml` builds the image locally, runs the stack drill on it, and pushes `:<sha>` and `:latest` only if the drill passes. With the repository variable `PUBLIC_URL` set, the deploy job polls `/__build-id` for five minutes after the webhook.
+- **Rejected:** Adventures' separate frontend image and GitHub Pages path. BibleStudy serves its client from the one app image.
+- **Rejected:** SSH from Actions to the VPS. Portainer owns the stack and its secrets, as in Adventures.
+
+### 2026-11-01 — CSB imported from the owner's files
+- **Context:** The owner holds the CSB as 66 `NN-Book.xml` files and asked to "integrate the CSB bible" from them. No API.Bible key exists yet, so CSB was never readable.
+- **Chosen:**
+  - `import-content --translation CSB --from <folder>` parses the files into the same chapter content as BSB: verses, headings and footnotes; cross-references, verse numbers and typographic spacing are dropped. Where a verse's own number marker disagrees with its element's reference, the marker wins; a table verse runs from its marker to the next.
+  - An imported CSB chapter has no expiry and is served without API.Bible. An API.Bible fetch never overwrites it; an import replaces an API.Bible copy. With imported chapters and no key, CSB lists only the imported books.
+  - The files stay out of git (`/bibles/`) and the image (`.dockerignore`). Tests use synthetic markup only. On the VPS they are copied into the container for the import and deleted (docs/deploy.md step 7).
+  - I-11 now limits expiry to the API.Bible cache.
+- **Rejected:** baking the files into the image or a volume. The repository and its image are public.
+- **Rejected:** serving straight from the files at request time. Postgres gives the content hash, offline downloads and backups that BSB already has.
+- **Flag:** CSB is copyrighted. Serving it on a public site, even behind sign-in, is covered only by the owner's own licence; that is the owner's to confirm (Open, above). D-2026-10-30-04 rejected copying from read.csbible.com; these are the owner's files, not that site's.
 
 ### 2026-11-01 — Align after S18: the design follows the code on modules and errors, and a database outage is now detected
 - **Context:** An `/align` pass compared the design and contract with the tree after S18 and found four differences that were decisions.

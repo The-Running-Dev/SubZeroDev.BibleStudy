@@ -252,11 +252,10 @@ export async function downloadChapter(
       ) {
         throw new Error('The download manifest is incomplete; try again.');
       }
+      // Text without an expiry is imported (BSB, and CSB from the owner's files) and is kept.
       if (
-        (manifest.expiresAt !== null &&
-          (!Number.isFinite(Date.parse(manifest.expiresAt)) ||
-            Date.parse(manifest.expiresAt) <= Date.now())) ||
-        (ref.translationId === 'CSB' && manifest.expiresAt === null)
+        manifest.expiresAt !== null &&
+        (!Number.isFinite(Date.parse(manifest.expiresAt)) || Date.parse(manifest.expiresAt) <= Date.now())
       ) {
         throw new Error('This download has expired — connect to download it again.');
       }
@@ -404,9 +403,8 @@ async function evicted(record: DownloadRecord): Promise<boolean> {
 }
 
 const isExpired = (record: DownloadRecord) =>
-  record.expiresAt !== null
-    ? !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= Date.now()
-    : record.translationId === 'CSB';
+  record.expiresAt !== null &&
+  (!Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= Date.now());
 
 // Licensed text is kept no longer than the server may keep it (I-11): an expired download keeps only its listing.
 async function expire(record: DownloadRecord): Promise<void> {
