@@ -21,6 +21,8 @@ env:
 jobs:
   image:
     name: image
+    # A manual run from another branch would otherwise publish that branch as :latest.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,7 +63,7 @@ jobs:
     needs: image
     # Off until the owner sets the repository variable DEPLOY_ENABLED to true and adds the
     # PORTAINER_REDEPLOY_WEBHOOK_URL secret; until then a merge only publishes the image.
-    if: vars.DEPLOY_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Redeploy the Portainer stack

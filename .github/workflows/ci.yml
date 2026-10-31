@@ -73,7 +73,7 @@ jobs:
           npm run test:e2e
 
       # verification: true
-      # The production compose.yaml with .env.example's values: build id, data surviving down/up,
+      # The production compose.yaml with stack.env.example's values: build id, data surviving down/up,
       # backup and restore into an empty stack, and a failing migration stopping the container.
       - name: Stack drill (compose.yaml, backup, restore, failed migration)
         run: npm run drill -- --build-id ci-${{ github.sha }}

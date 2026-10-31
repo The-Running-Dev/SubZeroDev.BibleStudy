@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import type { Db } from '../../src/server/platform/db.ts';
-import { backup, listBackups, nextRunAt, prune, readManifest, restore, stampFor, type BackupDeps } from '../../src/server/platform/backup.ts';
+import { backup, listBackups, nextRunAt, prune, readManifest, restore, stampFor, withBackupLock, type BackupDeps } from '../../src/server/platform/backup.ts';
 
 const sha = (data: string) => createHash('sha256').update(data).digest('hex');
 const roots: string[] = [];
@@ -113,6 +113,53 @@ describe('prune', () => {
     assert.deepEqual(await listBackups(deps.backupDir), ['2026-11-01T033000Z', '2026-11-02T033000Z']);
     assert.deepEqual(await readdir(join(deps.backupDir, 'media')), [second]);
   });
+
+  test('drops the folders of runs that never finished', async () => {
+    const { deps } = await setup();
+    await backup(deps);
+    await mkdir(join(deps.backupDir, '2026-10-30T033000Z.partial'));
+    await prune(deps.backupDir, 5);
+    assert.deepEqual((await readdir(deps.backupDir)).sort(), ['2026-10-31T033000Z', 'media']);
+  });
+
+  test('leaves the media store alone when a kept run cannot be read', async () => {
+    const { deps, clock } = await setup();
+    const name = await addMedia(deps, 'audio');
+    await backup(deps);
+    clock.at = new Date('2026-11-01T03:30:00Z');
+    const second = await backup(deps);
+    await writeFile(join(deps.backupDir, second.stamp, 'manifest.json'), '{ truncated');
+    await writeFile(join(deps.backupDir, 'media', `${sha('orphan')}.mp3`), 'orphan');
+    const result = await prune(deps.backupDir, 5);
+    assert.deepEqual(result.removedMedia, []);
+    assert.deepEqual((await readdir(join(deps.backupDir, 'media'))).sort(), [name, `${sha('orphan')}.mp3`].sort());
+  });
+});
+
+describe('withBackupLock', () => {
+  test('a second run while one holds the lock is refused, and the lock is released after', async () => {
+    const { deps } = await setup();
+    let release!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => (started = resolve));
+    const held = withBackupLock(deps.backupDir, () => new Promise<void>((resolve) => ((release = resolve), started())));
+    await running;
+    await assert.rejects(withBackupLock(deps.backupDir, async () => 'second'), /another backup is running/);
+    release();
+    await held;
+    assert.equal(await withBackupLock(deps.backupDir, async () => 'third'), 'third');
+    assert.deepEqual(await readdir(deps.backupDir), []);
+  });
+
+  test('a lock left by a killed run is taken over once it is old', async () => {
+    const { deps } = await setup();
+    await mkdir(deps.backupDir, { recursive: true });
+    const lock = join(deps.backupDir, '.lock');
+    await writeFile(lock, '1 2026-10-30T00:00:00Z\n');
+    const old = new Date(Date.now() - 7 * 60 * 60 * 1000);
+    await utimes(lock, old, old);
+    assert.equal(await withBackupLock(deps.backupDir, async () => 'ran'), 'ran');
+  });
 });
 
 describe('restore', () => {
@@ -150,5 +197,15 @@ describe('restore', () => {
   test('a name that is not a backup is refused before any file is read', async () => {
     const { deps } = await setup(0);
     await assert.rejects(restore(deps, '../../etc'), /not a backup name/);
+  });
+
+  test('a manifest naming files a backup never writes is refused', async () => {
+    const { deps } = await setup(0);
+    const manifest = await backup(deps);
+    const path = join(deps.backupDir, manifest.stamp, 'manifest.json');
+    await writeFile(path, JSON.stringify({ ...manifest, media: [{ name: '../../escape.mp3', sha256: 'x', bytes: 1 }] }));
+    await assert.rejects(readManifest(deps.backupDir, manifest.stamp), /names files a backup never writes/);
+    await writeFile(path, JSON.stringify({ ...manifest, database: { ...manifest.database, file: '../db.dump' } }));
+    await assert.rejects(restore(deps, manifest.stamp), /names files a backup never writes/);
   });
 });

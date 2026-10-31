@@ -6,7 +6,7 @@
 #
 # Deployed as a Portainer Git stack, set the variables below in the stack's "Environment variables";
 # Portainer feeds them into the ${...} interpolation and writes no .env file, so no service uses
-# env_file. Running it by hand, copy .env.example to a git-ignored .env next to this file.
+# env_file. Running it by hand, copy stack.env.example to a git-ignored .env next to this file.
 #
 # Operator prerequisites (docs/deploy.md):
 #   - the reverse proxy's network exists (default proxy-net); it is external, so Compose fails fast
@@ -55,7 +55,9 @@ services:
     volumes:
       - db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U biblestudy -d biblestudy"]
+      # Over TCP: during first-boot initialisation the server answers on its socket only, and a socket
+      # check would pass before the stack's other services can connect.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U biblestudy -d biblestudy"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -63,8 +65,10 @@ services:
     networks:
       - internal
 
-  # Runs the migrations once per deploy. If one fails, `up` stops here and the running app is not
-  # replaced. The app also migrates on start (a no-op after this) and exits if that fails.
+  # Runs the migrations once per deploy, inside one transaction each. Compose stops the old app before it
+  # waits on this, so a failed migration leaves the site down, with nothing applied, until the previous
+  # image is redeployed (docs/deploy.md, Rolling back). The app also migrates on start (a no-op after
+  # this) and exits if that fails, so it never serves a half-migrated schema.
   migrate:
     <<: *app
     command: ["node", "src/server/platform/migrate-cli.ts"]
@@ -77,7 +81,9 @@ services:
       db:
         condition: service_healthy
 
-  app:
+  # Named for this app rather than `app`: Compose gives every service its name as an alias on each network
+  # it joins, and another stack on the shared proxy network with an `app` would share that name.
+  biblestudy:
     <<: *app
     volumes:
       - media:/app/data/media
@@ -93,13 +99,19 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # pg_dump plus a media manifest every day at BACKUP_AT (UTC); keeps BACKUP_KEEP runs.
+  # pg_dump plus a media manifest every day at BACKUP_AT (UTC), and at start when the newest is a day old;
+  # keeps BACKUP_KEEP runs.
   backup:
     <<: *app
     command: ["node", "src/server/platform/backup-cli.ts", "schedule"]
-    # The image's health check probes the web listener, which this service does not run.
+    # Unhealthy once the newest backup is more than 26 h old, so a failing nightly run shows in Portainer.
     healthcheck:
-      disable: true
+      test: ["CMD", "node", "src/server/platform/backup-cli.ts", "health"]
+      interval: 10m
+      timeout: 30s
+      retries: 1
+      start_period: 10m
+      start_interval: 3s
     volumes:
       - media:/app/data/media
       # A named volume by default. Set BACKUP_DIR to a host path (owned by uid 1000) to keep the
@@ -110,6 +122,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Its first run counts tables the migrations create.
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   db:

@@ -55,6 +55,8 @@ describe('loadConfig', () => {
   test('names every missing or weak variable', () => {
     assert.throws(() => loadConfig({}), /DATABASE_URL is required; APP_SECRET is required; SMTP_URL is required/);
     assert.throws(() => loadConfig({ ...base, APP_SECRET: 'short' }), /APP_SECRET must be at least 32 characters/);
+    assert.throws(() => loadConfig({ ...base, APP_SECRET: 'replace-with-at-least-32-random-characters' }), /APP_SECRET is still the example placeholder/);
+    assert.throws(() => loadConfig({ ...base, CONNECTOR_TOKEN: 'replace-with-at-least-32-random-characters' }), /CONNECTOR_TOKEN is still the example placeholder/);
     assert.throws(() => loadConfig({ ...base, PORT: 'abc' }), /PORT must be a positive integer/);
   });
 

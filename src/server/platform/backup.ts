@@ -1,9 +1,9 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { PassThrough } from 'node:stream';
 import type { Db } from './db.ts';
 
 // Nightly backups: a pg_dump and a media manifest per run, in a dated folder under the backup directory.
@@ -33,7 +33,7 @@ export interface BackupManifest {
 
 export interface BackupDeps {
   db: Db;
-  // Writes a dump of the database to the given file, and restores one.
+  // Writes a dump of the database to the given file, and restores one in place of everything in the database.
   dump: (file: string) => Promise<void>;
   restore: (file: string) => Promise<void>;
   mediaDir: string;
@@ -47,6 +47,9 @@ export const countedTables = ['users', 'groups', 'memberships', 'chapters', 'rec
 const mediaName = /^[0-9a-f]{64}\.[a-z0-9]+$/;
 const stampPattern = /^\d{4}-\d{2}-\d{2}T\d{6}Z$/;
 const mediaStore = 'media';
+const lockFile = '.lock';
+// A lock older than this was left by a run that was killed, not one still going.
+const staleLockMs = 6 * 60 * 60 * 1000;
 
 export function stampFor(at: Date): string {
   return at.toISOString().replace(/[-:]/g, '').replace(/^(\d{4})(\d{2})(\d{2})/, '$1-$2-$3').replace(/\.\d{3}Z$/, 'Z');
@@ -75,6 +78,28 @@ async function copyAtomic(from: string, to: string): Promise<void> {
     await rename(temp, to);
   } finally {
     await rm(temp, { force: true });
+  }
+}
+
+// One backup or prune at a time per backup directory: a manual run during the scheduled one could otherwise
+// prune media the other run has copied but not yet listed.
+export async function withBackupLock<T>(backupDir: string, run: () => Promise<T>): Promise<T> {
+  await mkdir(backupDir, { recursive: true });
+  const path = join(backupDir, lockFile);
+  const take = () => open(path, 'wx');
+  const handle = await take().catch(async (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EEXIST') throw error;
+    const held = await stat(path).catch(() => null);
+    if (held && Date.now() - held.mtimeMs < staleLockMs) throw new Error(`another backup is running (${path})`);
+    await rm(path, { force: true });
+    return take();
+  });
+  try {
+    await handle.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
+    await handle.close();
+    return await run();
+  } finally {
+    await rm(path, { force: true });
   }
 }
 
@@ -135,17 +160,31 @@ export async function listBackups(backupDir: string): Promise<string[]> {
 
 export async function readManifest(backupDir: string, stamp: string): Promise<BackupManifest> {
   if (!stampPattern.test(stamp)) throw new Error(`not a backup name: ${stamp}`);
-  return JSON.parse(await readFile(join(backupDir, stamp, 'manifest.json'), 'utf8')) as BackupManifest;
+  const manifest = JSON.parse(await readFile(join(backupDir, stamp, 'manifest.json'), 'utf8')) as BackupManifest;
+  // Names become paths on restore, so a manifest naming anything else is refused rather than followed.
+  if (manifest.database?.file !== 'db.dump' || !Array.isArray(manifest.media) || !manifest.media.every((m) => mediaName.test(m.name))) {
+    throw new Error(`${stamp}: the manifest names files a backup never writes`);
+  }
+  return manifest;
 }
 
-// Keeps the newest `keep` runs and drops media no kept manifest lists.
+// Keeps the newest `keep` runs, drops the folders of runs that never finished, and drops media no kept
+// manifest lists. Run under withBackupLock, so no .partial folder belongs to a run still going.
 export async function prune(backupDir: string, keep: number): Promise<{ removedRuns: string[]; removedMedia: string[] }> {
   const runs = await listBackups(backupDir);
   const removedRuns = runs.slice(0, Math.max(0, runs.length - keep));
   for (const run of removedRuns) await rm(join(backupDir, run), { recursive: true, force: true });
+  for (const entry of await readdir(backupDir, { withFileTypes: true }).catch(() => [])) {
+    if (entry.isDirectory() && entry.name.endsWith('.partial')) await rm(join(backupDir, entry.name), { recursive: true, force: true });
+  }
 
   const referenced = new Set<string>();
-  for (const run of runs.slice(removedRuns.length)) for (const entry of (await readManifest(backupDir, run)).media) referenced.add(entry.name);
+  for (const run of runs.slice(removedRuns.length)) {
+    // A kept run whose manifest cannot be read may need any stored file, so the store is left as it is.
+    const manifest = await readManifest(backupDir, run).catch(() => null);
+    if (!manifest) return { removedRuns, removedMedia: [] };
+    for (const entry of manifest.media) referenced.add(entry.name);
+  }
   const removedMedia: string[] = [];
   const storeDir = join(backupDir, mediaStore);
   for (const name of await readdir(storeDir).catch(() => [] as string[])) {
@@ -156,7 +195,8 @@ export async function prune(backupDir: string, keep: number): Promise<{ removedR
   return { removedRuns, removedMedia };
 }
 
-// Restores a run into a database with no users, unless forced, and puts its media back.
+// Restores a run into a database with no users, unless forced, and puts its media back. The database is
+// replaced wholesale, so a run taken before a later migration restores too; the next start migrates it.
 export async function restore(deps: Omit<BackupDeps, 'dump' | 'now' | 'buildId'>, stamp: string, options: { force?: boolean } = {}): Promise<BackupManifest> {
   const manifest = await readManifest(deps.backupDir, stamp);
   const dumpFile = join(deps.backupDir, stamp, manifest.database.file);
@@ -167,7 +207,10 @@ export async function restore(deps: Omit<BackupDeps, 'dump' | 'now' | 'buildId'>
   }
 
   if (!options.force) {
-    const users = await deps.db.query<{ n: string | null }>(`SELECT CASE WHEN to_regclass('public.users') IS NULL THEN NULL ELSE (SELECT count(*) FROM users) END AS n`).catch(() => null);
+    // Two queries: PostgreSQL resolves every table a statement names before running it, so one statement
+    // that counts users fails on a database with no schema yet.
+    const table = await deps.db.query<{ n: string | null }>(`SELECT to_regclass('public.users')::text AS n`);
+    const users = table.rows[0]?.n ? await deps.db.query<{ n: string }>(`SELECT count(*) AS n FROM users`) : null;
     const n = Number(users?.rows[0]?.n ?? 0);
     if (n > 0) throw new Error(`the database already has ${n} user(s); restore only into an empty stack, or pass --force to replace it`);
   }
@@ -182,7 +225,22 @@ export async function restore(deps: Omit<BackupDeps, 'dump' | 'now' | 'buildId'>
   return manifest;
 }
 
-// pg_dump and pg_restore, given the connection through the environment so the password is not on the command line.
+// Runs a program, optionally feeding it a stream, and fails with the end of its stderr when it exits non-zero.
+function runTool(command: string, argv: string[], env: NodeJS.ProcessEnv, input?: NodeJS.ReadableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, argv, { env, stdio: [input ? 'pipe' : 'ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr!.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-4000)));
+    if (input) input.pipe(child.stdin!);
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}: ${stderr.trim()}`))));
+  });
+}
+
+// pg_dump, and a restore that replaces the whole public schema in one transaction: pg_restore turns the dump
+// into SQL and psql runs it after dropping the schema. `pg_restore --clean` alone drops only what the dump
+// holds, so a table from a later migration that references one of them would block the restore. The
+// connection goes through the environment so the password is not on the command line.
 export function postgresTools(databaseUrl: string): Pick<BackupDeps, 'dump' | 'restore'> {
   const url = new URL(databaseUrl);
   const env = {
@@ -193,13 +251,25 @@ export function postgresTools(databaseUrl: string): Pick<BackupDeps, 'dump' | 'r
     PGPASSWORD: decodeURIComponent(url.password),
     PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')),
   };
-  const run = promisify(execFile);
   return {
-    dump: async (file) => {
-      await run('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', `--file=${file}`], { env });
-    },
+    dump: (file) => runTool('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', `--file=${file}`], env),
     restore: async (file) => {
-      await run('pg_restore', ['--clean', '--if-exists', '--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error', `--dbname=${env.PGDATABASE}`, file], { env });
+      const sql = new PassThrough();
+      sql.write('DROP SCHEMA public CASCADE;\nCREATE SCHEMA public;\n');
+      const script = spawn('pg_restore', ['--no-owner', '--no-privileges', '--file=-', file], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let scriptError = '';
+      script.stderr.on('data', (chunk: Buffer) => (scriptError = (scriptError + chunk.toString()).slice(-4000)));
+      script.stdout.pipe(sql, { end: false });
+      const scripted = new Promise<void>((resolve, reject) => {
+        script.on('error', (error) => (sql.end(), reject(error)));
+        script.on('close', (code) => {
+          // A script cut short must not commit: it ends in an error, so psql rolls the whole transaction back.
+          if (code === 0) return sql.end(), resolve();
+          sql.end('\nSELECT 1/0;\n');
+          reject(new Error(`pg_restore exited ${code}: ${scriptError.trim()}`));
+        });
+      });
+      await Promise.all([scripted, runTool('psql', ['--no-psqlrc', '--quiet', '--single-transaction', '--set=ON_ERROR_STOP=1', '--file=-'], env, sql)]);
     },
   };
 }

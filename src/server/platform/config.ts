@@ -73,6 +73,9 @@ export function loadConfig(env: Env = process.env): Config {
   };
 
   if (config.appSecret && config.appSecret.length < 32) problems.push('APP_SECRET must be at least 32 characters');
+  // The example files' placeholders pass the length check and are public.
+  if (config.appSecret?.startsWith('replace-with')) problems.push('APP_SECRET is still the example placeholder');
+  if (config.connectorToken?.startsWith('replace-with')) problems.push('CONNECTOR_TOKEN is still the example placeholder');
   if (config.ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.ownerEmail)) problems.push('OWNER_EMAIL must be an email address');
   if (config.assistantOwnerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.assistantOwnerEmail)) {
     problems.push('ASSISTANT_OWNER_EMAIL must be an email address');
