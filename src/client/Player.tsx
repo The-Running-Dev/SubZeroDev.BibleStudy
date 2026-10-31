@@ -8,9 +8,16 @@ const pollMs = 5000;
 
 type Listing = { kind: 'loading' } | { kind: 'ready'; listing: RecordingsResponse } | { kind: 'error'; message: string };
 
+// What a download kept on this device for the chapter (S14): the recording and a local URL for its audio, if any.
+export interface DevicePlayback {
+  recording: RecordingView | null;
+  audioUrl: string | null;
+}
+
 // Solo playback of the displayed chapter (S3). `onVerse` gets the verse being read, or null when none is.
-export function Player(props: { translation: TranslationView | undefined; at: PassageRef; verseCount: number | null; onVerse: (verse: number | null) => void }) {
-  const { translation, at, verseCount, onVerse } = props;
+// With `device`, the chapter is being read from a download and nothing is fetched.
+export function Player(props: { translation: TranslationView | undefined; at: PassageRef; verseCount: number | null; onVerse: (verse: number | null) => void; device?: DevicePlayback }) {
+  const { translation, at, verseCount, onVerse, device } = props;
   const audio = useRef<HTMLAudioElement>(null);
   // A range play stops when the next verse starts; the last verse of the range stays highlighted until the next seek or play.
   const stopAt = useRef<{ from: number; seconds: number; verse: number } | null>(null);
@@ -21,7 +28,7 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
   const narrated = translation?.narration.state === 'available';
 
   useEffect(() => {
-    if (!translation || !narrated) return;
+    if (!translation || !narrated || device) return;
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     setState({ kind: 'loading' });
@@ -45,9 +52,9 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
       current = false;
       clearTimeout(timer);
     };
-  }, [translation, narrated, at.bookId, at.chapter]);
+  }, [translation, narrated, device, at.bookId, at.chapter]);
 
-  const recordings = state.kind === 'ready' ? state.listing.recordings : [];
+  const recordings = device ? (device.recording ? [device.recording] : []) : state.kind === 'ready' ? state.listing.recordings : [];
   const recording: RecordingView | undefined = recordings.find((r) => r.narratorId === narratorId) ?? recordings[0];
   const starts = recording?.timing.status === 'verified' ? recording.timing.verseStarts : null;
   // Each poll brings a new `starts` array; the follower below keys on the recording, not the array.
@@ -133,14 +140,25 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
     await element.play().catch(() => undefined);
   }
 
-  const listing = state.kind === 'ready' ? state.listing : null;
+  // S14.4: a download without narration plays nothing offline, and says why.
+  if (device && !recording) {
+    return (
+      <section className="player" aria-label="Narration">
+        <p className="player-note" role="status">
+          Narration needs a connection.
+        </p>
+      </section>
+    );
+  }
+
+  const listing = device ? null : state.kind === 'ready' ? state.listing : null;
   const preparing = listing !== null && recordings.length === 0 && listing.preparing.length > 0;
   const failed = listing?.failed ?? [];
 
   return (
     <section className="player" aria-label="Narration">
-      {state.kind === 'loading' && <p className="player-note">Loading narration…</p>}
-      {state.kind === 'error' && <p className="player-note" role="status">{state.message}</p>}
+      {!device && state.kind === 'loading' && <p className="player-note">Loading narration…</p>}
+      {!device && state.kind === 'error' && <p className="player-note" role="status">{state.message}</p>}
       {preparing && <p className="player-note" role="status">Preparing narration…</p>}
       {failed.length > 0 && (
         <p className="player-note" role="status">
@@ -168,7 +186,7 @@ export function Player(props: { translation: TranslationView | undefined; at: Pa
           </div>
           <audio
             ref={audio}
-            src={recording.mediaUrl}
+            src={device?.audioUrl ?? recording.mediaUrl}
             controls
             preload="metadata"
             aria-label={`${formatReference({ ...at, startVerse: null, endVerse: null })} read by ${recording.narratorName}`}

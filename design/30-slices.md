@@ -236,7 +236,7 @@ Acceptance:
 Out of scope: CSB audio (none exists).
 
 ## S14 — Install on a phone and download chapters for offline
-Status: todo
+Status: done
 Delivers: A member can add the app to their phone's home screen with in-app help, download chosen chapters (text only, or with narration, size shown first), and read and listen to them with no connection after a full close.
 Touches: client shell (manifest, install help), service worker, offline (`downloadChapter`, `removeDownload`), content (`downloadManifest`)
 Depends on: S3

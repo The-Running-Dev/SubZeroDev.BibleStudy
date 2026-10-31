@@ -3,15 +3,22 @@ import type { FormEvent } from 'react';
 import type { ChapterView, NoteView, PassageRef, SoloPosition, SyncOp, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById, books } from '../shared/books.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
-import { api, messageFor } from './api.ts';
+import { ApiFailure, api, messageFor } from './api.ts';
 import { AssistantPanel } from './Assistant.tsx';
+import { Download } from './Download.tsx';
 import { reportFums } from './fums.ts';
 import { Notes, inChapter } from './Notes.tsx';
+import { offlineChapter } from './offline.ts';
+import type { OfflineChapter } from './offline.ts';
 import { Passage } from './Passage.tsx';
 import { Player } from './Player.tsx';
 import { ReaderQuestions } from './Questions.tsx';
 
-type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView } | { kind: 'unavailable'; message: string };
+// `device` is set when the chapter came from a download because the server could not be reached (S14.2).
+type Text = { kind: 'loading' } | { kind: 'ready'; chapter: ChapterView; device: OfflineChapter | null } | { kind: 'unavailable'; message: string };
+
+// No answer at all, or a server that is down: the device's own copy is used if there is one.
+const unreachable = (error: unknown) => error instanceof TypeError || (error instanceof ApiFailure && error.status >= 500);
 
 const start: PassageRef = { bookId: 'ROM', chapter: 1, startVerse: null, endVerse: null };
 // The solo position is saved once the reader has stayed put this long.
@@ -114,15 +121,30 @@ export function Reader(props: { groupId: string | null; userId: string }) {
 
   useEffect(() => {
     let current = true;
+    let audioUrl: string | null = null;
     setText({ kind: 'loading' });
+    const ref = { translationId, bookId: at.bookId, chapter: at.chapter };
     api
       .chapter(translationId, at.bookId, at.chapter)
-      .then((chapter) => current && setText({ kind: 'ready', chapter }))
-      .catch((error) => current && setText({ kind: 'unavailable', message: messageFor(error) }));
+      .then((chapter) => current && setText({ kind: 'ready', chapter, device: null }))
+      .catch(async (error) => {
+        if (!unreachable(error)) return current && setText({ kind: 'unavailable', message: messageFor(error) });
+        const device = await offlineChapter(props.userId, ref).catch(() => null);
+        if (device && typeof device === 'object') audioUrl = device.audioUrl;
+        if (!current) {
+          if (audioUrl) URL.revokeObjectURL(audioUrl);
+          return;
+        }
+        if (device === 'expired') setText({ kind: 'unavailable', message: 'The download of this chapter has expired — connect to download it again.' });
+        else if (device) setText({ kind: 'ready', chapter: device.chapter, device });
+        // A server that answered with an error is named as such; only no answer at all is "needs a connection".
+        else setText({ kind: 'unavailable', message: error instanceof ApiFailure ? messageFor(error) : 'Not downloaded — needs a connection.' });
+      });
     return () => {
       current = false;
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
     };
-  }, [translationId, at.bookId, at.chapter]);
+  }, [translationId, at.bookId, at.chapter, props.userId]);
 
   const shown = text.kind === 'ready' && text.chapter.bookId === at.bookId && text.chapter.chapter === at.chapter ? text.chapter : null;
 
@@ -143,7 +165,8 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   }, [shown, at]);
 
   const book = bookById(at.bookId)!;
-  const translation = translations.find((t) => t.id === translationId);
+  const device = text.kind === 'ready' ? text.device : null;
+  const translation = translations.find((t) => t.id === translationId) ?? device?.translation ?? undefined;
   const notice = translation?.copyrightNotice;
   const previous = adjacentChapter(at, -1);
   const next = adjacentChapter(at, 1);
@@ -181,7 +204,7 @@ export function Reader(props: { groupId: string | null; userId: string }) {
             }}
             aria-label="Translation"
           >
-            {(translations.length ? translations.map((t) => t.id) : (['BSB'] as TranslationId[])).map((id) => (
+            {(translations.length ? translations.map((t) => t.id) : [...new Set<TranslationId>(['BSB', translationId])]).map((id) => (
               <option key={id} value={id}>
                 {id}
               </option>
@@ -209,7 +232,10 @@ export function Reader(props: { groupId: string | null; userId: string }) {
         {entryError && <p role="alert">{entryError}</p>}
       </header>
 
-      {shown && <Player translation={translation} at={at} verseCount={shown.verseCount} onVerse={setPlaying} />}
+      {shown && <Player translation={translation} at={at} verseCount={shown.verseCount} onVerse={setPlaying} device={device ?? undefined} />}
+      {shown && (
+        <Download userId={props.userId} at={{ translationId, bookId: at.bookId, chapter: at.chapter }} narrated={translation?.narration.state === 'available'} fromDevice={device !== null} />
+      )}
 
       <article className="passage" aria-busy={text.kind === 'loading'}>
         {text.kind === 'unavailable' && <p role="status">{text.message}</p>}

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { GroupSummary, Profile } from '../shared/api.ts';
 import { ApiFailure, api } from './api.ts';
+import { DownloadsList } from './Download.tsx';
 import { GroupPanel } from './Group.tsx';
+import { InstallHelp } from './InstallHelp.tsx';
 import { clearInvitation, invalidInvitationMessage, pendingInvitation } from './invitation.ts';
+import { forgetProfile, rememberProfile, rememberedProfile } from './offline.ts';
 import { ProfileForm } from './ProfileForm.tsx';
 import { Reader } from './Reader.tsx';
 import { SignIn } from './SignIn.tsx';
@@ -37,10 +40,21 @@ export function App() {
       .me()
       .then(async (profile) => setState({ kind: 'home', profile, notice: await acceptPending() }))
       .catch((error) => {
-        if (error instanceof ApiFailure && error.status === 401) setState({ kind: 'signed-out' });
+        if (error instanceof ApiFailure && error.status === 401) {
+          forgetProfile();
+          setState({ kind: 'signed-out' });
+          return;
+        }
+        // S14.2: with no server, the member last signed in on this device still reaches their downloads.
+        const remembered = rememberedProfile<Profile>();
+        if (remembered) setState({ kind: 'home', profile: remembered, notice: 'Server unavailable — showing what is on this device.' });
         else setState({ kind: 'error', message: 'Cannot reach the server. Reload to try again.' });
       });
   }, []);
+
+  useEffect(() => {
+    if (state.kind === 'home' || state.kind === 'setup') rememberProfile(state.profile);
+  }, [state]);
 
   switch (state.kind) {
     case 'loading':
@@ -98,6 +112,7 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
 
   async function signOut() {
     await api.logout().catch(() => undefined);
+    forgetProfile();
     props.onSignedOut();
   }
 
@@ -146,6 +161,8 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
           <button type="button" className="secondary" onClick={signOut}>
             Sign out
           </button>
+          <DownloadsList userId={props.profile.id} />
+          <InstallHelp />
         </section>
       )}
       {studying && group ? <Study groupId={group.id} userId={props.profile.id} /> : <Reader groupId={group?.id ?? null} userId={props.profile.id} />}
