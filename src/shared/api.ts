@@ -40,6 +40,7 @@ export type ErrorCode =
   | 'not_author'
   | 'stale_revision'
   | 'empty_body'
+  | 'stale_progress'
   | 'internal';
 
 export interface ApiError {
@@ -257,6 +258,47 @@ export interface QuestionView {
   version: number;
 }
 
+// What a wrap-up decides for a question; `open` is only where a question starts.
+export type Disposition = Exclude<QuestionStatus, 'open'>;
+export const dispositions: readonly Disposition[] = ['closed', 'carried', 'resolved', 'no_longer_relevant'];
+
+export interface DispositionRequest {
+  status: Disposition;
+  // The question's version the member decided on; stale_revision (409) with details.current when it changed since.
+  version: number;
+  sessionId?: Uuid;
+}
+
+// ---- progress ----
+
+export interface StoppingPoint {
+  bookId: BookId;
+  chapter: number;
+  verse: number;
+}
+
+export interface GroupProgressView {
+  id: Uuid;
+  ref: StoppingPoint;
+  confirmedBy: string;
+  confirmedAt: IsoInstant;
+}
+
+// `basedOnId` is the stopping point the member last saw (null when the group has none yet). A confirmation based on an
+// older one is rejected with `stale_progress`, whose details carry the current one as `current`.
+export interface ConfirmProgressRequest {
+  basedOnId: Uuid | null;
+  ref: StoppingPoint;
+  sessionId?: Uuid;
+}
+
+// The furthest verse the session reached on its chapter, and the questions still to settle: the unsettled ones on its
+// chapter, those posted during it, and every carried one.
+export interface WrapUpView {
+  suggested: StoppingPoint;
+  openQuestions: QuestionView[];
+}
+
 export interface PostQuestionRequest {
   clientOpId: Uuid;
   anchor: PassageRef & { translationId: TranslationId };
@@ -277,7 +319,8 @@ export interface DeletePostResponse {
   outcome: 'deleted' | 'body_removed';
 }
 
-// The realtime channel (/ws). The snapshot carries the open questions on the session's chapter; S6 adds the assistant events.
+// The realtime channel (/ws). The snapshot carries the questions the study keeps in view (as WrapUpView.openQuestions); S6
+// adds the assistant events.
 export type ClientMessage =
   | { t: 'hello'; clientId: Uuid }
   | { t: 'ping'; clientSentMs: number }

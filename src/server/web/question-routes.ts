@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { DeletePostResponse, QuestionView, ReplyView } from '../../shared/api.ts';
 import type { PostTarget, QuestionDeps } from '../questions/questions.ts';
-import { deletePost, editPost, listQuestions, parseFilter, postQuestion, postReply } from '../questions/questions.ts';
+import { deletePost, editPost, listQuestions, parseFilter, postQuestion, postReply, setDisposition } from '../questions/questions.ts';
 import type { RealtimeHub } from '../study/realtime.ts';
 import type { AppDeps } from './app.ts';
 import { requireAuth } from './auth.ts';
@@ -54,6 +54,13 @@ export function registerQuestionRoutes(app: FastifyInstance, deps: AppDeps, hub:
     await announce(params.groupId, question);
     return { outcome };
   };
+
+  app.post('/api/groups/:groupId/questions/:questionId/disposition', async (request): Promise<QuestionView> => {
+    const { groupId, questionId } = request.params as Params;
+    const question = await setDisposition(questions, requireAuth(request).userId, groupId, questionId, request.body);
+    await announce(groupId, question);
+    return question;
+  });
 
   app.patch('/api/groups/:groupId/questions/:questionId', edit((p) => ({ questionId: p.questionId })));
   app.delete('/api/groups/:groupId/questions/:questionId', remove((p) => ({ questionId: p.questionId })));

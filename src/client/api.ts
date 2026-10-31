@@ -5,13 +5,16 @@ import type {
   AssistantTranscript,
   AssistantTurnStatus,
   CreatedInvitation,
+  GroupProgressView,
   GroupSummary,
   GroupView,
   InvitationView,
   ChapterView,
   RecordingsResponse,
   CodeDelivery,
+  ConfirmProgressRequest,
   DeletePostResponse,
+  DispositionRequest,
   EditPostRequest,
   PostQuestionRequest,
   PostReplyRequest,
@@ -27,6 +30,7 @@ import type {
   TranslationId,
   TranslationView,
   VerifyCodeResponse,
+  WrapUpView,
 } from '../shared/api.ts';
 
 export class ApiFailure extends Error {
@@ -100,6 +104,13 @@ export const api = {
   editPost: (groupId: string, target: { questionId: string } | { replyId: string }, request: EditPostRequest) =>
     call<QuestionView | ReplyView>('PATCH', postUrl(groupId, target), request),
   deletePost: (groupId: string, target: { questionId: string } | { replyId: string }) => call<DeletePostResponse>('DELETE', postUrl(groupId, target)),
+  setDisposition: (groupId: string, questionId: string, request: DispositionRequest) =>
+    call<QuestionView>('POST', `/api/groups/${groupId}/questions/${questionId}/disposition`, request),
+  progress: (groupId: string) => call<{ progress: GroupProgressView | null }>('GET', `/api/groups/${groupId}/progress`),
+  // 409 `stale_progress`, carrying the current stopping point, when another member confirmed one after `basedOnId`.
+  confirmProgress: (groupId: string, request: ConfirmProgressRequest) => call<{ id: string }>('POST', `/api/groups/${groupId}/progress`, request),
+  // The suggested stopping point and the questions to settle; also the questions the study keeps in view.
+  wrapUp: (groupId: string, sessionId: string) => call<WrapUpView>('GET', `/api/groups/${groupId}/session/${sessionId}/wrap-up`),
 };
 
 function postUrl(groupId: string, target: { questionId: string } | { replyId: string }): string {

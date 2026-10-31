@@ -8,11 +8,14 @@ import type {
   RecordingView,
   StudySessionResponse,
   TranslationId,
+  WrapUpView,
 } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { derivePosition, rangeBounds, verseAtSeconds } from '../../shared/playback.ts';
 import { listRecordings, resolveRecording } from '../content/narration.ts';
 import { requireMember } from '../groups/groups.ts';
+import { latestProgress } from '../progress/progress.ts';
+import { sessionQuestions } from '../questions/questions.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Db, Queryable } from '../platform/db.ts';
 import { withTransaction } from '../platform/db.ts';
@@ -53,11 +56,13 @@ interface SessionRow {
   changed_by: string | null;
   changed_by_name: string | null;
   paused_reason: PausedReason | null;
+  reached_verse: number | null;
+  started_at: Date;
 }
 
 const sessionColumns = `s.id, s.group_id, s.status, s.revision, s.book_id, s.chapter, s.start_verse, s.end_verse, s.translation_id,
   s.narrator_id, s.recording_id, s.mode, s.play_status, s.position_seconds, s.anchor_server_time_ms, s.rate, s.manual_verse,
-  s.changed_by, u.display_name AS changed_by_name, s.paused_reason`;
+  s.changed_by, u.display_name AS changed_by_name, s.paused_reason, s.reached_verse, s.started_at`;
 
 async function loadSession(q: Queryable, sessionId: string, lock: boolean): Promise<SessionRow | null> {
   const result = await q.query<SessionRow>(
@@ -80,11 +85,23 @@ interface Draft {
   rate: number;
   manualVerse: number | null;
   pausedReason: PausedReason | null;
+  // The furthest verse reached on this chapter, for the wrap-up suggestion (S9.1).
+  reachedVerse: number | null;
 }
 
 function bounds(draft: Pick<Draft, 'recording' | 'passage'>) {
   return draft.recording ? rangeBounds(draft.recording.timing, draft.recording.durationSeconds, draft.passage) : { start: 0, end: 0 };
 }
+
+// The verse the study is on at `nowMs`: the marked one in manual mode, the narrated one when its timing is verified.
+function verseNow(draft: Draft, nowMs: number): number | null {
+  if (draft.mode === 'manual') return draft.manualVerse;
+  if (!draft.recording) return null;
+  const verse = verseAtSeconds(draft.recording.timing, derivePosition(draft, nowMs, bounds(draft).end));
+  return verse === null ? null : Math.min(verse, draft.passage.endVerse ?? verse);
+}
+
+const furthest = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.max(a, b));
 
 // The session as it stands at `nowMs`. A playing session past its range end reads as paused there;
 // that is not written back, so it does not change the revision.
@@ -106,6 +123,7 @@ async function effectiveDraft(q: Queryable, mediaDir: string, row: SessionRow, n
     rate: Number(row.rate),
     manualVerse: row.manual_verse,
     pausedReason: row.paused_reason,
+    reachedVerse: row.reached_verse,
   };
   if (draft.status === 'playing') {
     // A recording that went missing cannot be followed; it reads as paused where it was.
@@ -115,6 +133,8 @@ async function effectiveDraft(q: Queryable, mediaDir: string, row: SessionRow, n
       Object.assign(draft, { status: 'paused', positionSeconds: position, anchorServerTimeMs: nowMs, pausedReason: 'range_end' });
     }
   }
+  // Narration counts as reached only while it plays: a seek lands somewhere, it does not read up to it.
+  if (row.play_status === 'playing' || draft.mode === 'manual') draft.reachedVerse = furthest(draft.reachedVerse, verseNow(draft, nowMs));
   return draft;
 }
 
@@ -149,7 +169,7 @@ async function writeDraft(q: Queryable, sessionId: string, draft: Draft, changed
   await q.query(
     `UPDATE study_sessions SET revision = revision + 1, book_id = $2, chapter = $3, start_verse = $4, end_verse = $5, translation_id = $6,
        narrator_id = $7, recording_id = $8, mode = $9, play_status = $10, position_seconds = $11, anchor_server_time_ms = $12, rate = $13,
-       manual_verse = $14, paused_reason = $15, changed_by = $16, changed_at = $17,
+       manual_verse = $14, paused_reason = $15, changed_by = $16, changed_at = $17, reached_verse = $18,
        status = CASE WHEN $10 = 'ended' THEN 'ended' ELSE status END,
        ended_by = CASE WHEN $10 = 'ended' THEN $16 ELSE ended_by END,
        ended_at = CASE WHEN $10 = 'ended' THEN $17 ELSE ended_at END
@@ -172,6 +192,7 @@ async function writeDraft(q: Queryable, sessionId: string, draft: Draft, changed
       draft.status === 'paused' ? draft.pausedReason : null,
       changedBy,
       now,
+      draft.reachedVerse,
     ],
   );
 }
@@ -194,6 +215,7 @@ async function queueAudio(deps: StudyDeps, passage: PassageRef): Promise<void> {
 // ---- start, join, read ----
 
 // Starts the group's session, or returns the active one. Concurrent starts converge on one row (I-15).
+// A new session resumes at the group's stopping point (DOD-19), or opens the group's starting chapter before it has one.
 export async function startOrJoinSession(deps: StudyDeps, userId: string, groupId: unknown): Promise<StudySessionResponse> {
   const { db, clock } = deps;
   await requireMember(db, userId, groupId);
@@ -208,16 +230,22 @@ export async function startOrJoinSession(deps: StudyDeps, userId: string, groupI
         [id],
       )
     ).rows[0];
-    const passage: PassageRef = { bookId: group.start_book_id, chapter: group.start_chapter, startVerse: null, endVerse: null };
+    const progress = await latestProgress(tx, id);
+    const passage: PassageRef = progress
+      ? { bookId: progress.ref.bookId, chapter: progress.ref.chapter, startVerse: null, endVerse: null }
+      : { bookId: group.start_book_id, chapter: group.start_chapter, startVerse: null, endVerse: null };
+    const verse = progress?.ref.verse ?? 1;
     const narratorId = group.narrator_id ?? (await firstNarrator(tx, 'BSB'));
     const manual = group.shared_translation_id === 'CSB' || !narratorId;
     const recording = manual ? null : await resolveRecording({ db: tx, mediaDir: deps.mediaDir }, 'BSB', passage, narratorId);
     if (!manual && !recording) waiting = passage;
+    // Narration starts at the verse when its timing is known; before that it can only start at the chapter's beginning.
+    const position = recording?.timing.status === 'verified' ? (recording.timing.verseStarts[verse - 1] ?? 0) : 0;
     const now = clock.now();
     const inserted = await tx.query<{ id: string }>(
       `INSERT INTO study_sessions (id, group_id, status, started_by, started_at, revision, book_id, chapter, translation_id, narrator_id,
-         recording_id, mode, play_status, position_seconds, anchor_server_time_ms, rate, manual_verse, changed_at)
-       VALUES ($1, $2, 'active', $3, $4, 0, $5, $6, $7, $8, $9, $10, 'paused', 0, $11, $12, $13, $4)
+         recording_id, mode, play_status, position_seconds, anchor_server_time_ms, rate, manual_verse, changed_at, reached_verse)
+       VALUES ($1, $2, 'active', $3, $4, 0, $5, $6, $7, $8, $9, $10, 'paused', $14, $11, $12, $13, $4, $15)
        ON CONFLICT (group_id) WHERE status = 'active' DO NOTHING
        RETURNING id`,
       [
@@ -233,7 +261,9 @@ export async function startOrJoinSession(deps: StudyDeps, userId: string, groupI
         manual ? 'manual' : 'narration',
         now.getTime(),
         group.rate,
-        manual ? 1 : null,
+        manual ? verse : null,
+        position,
+        progress ? verse : null,
       ],
     );
     if (inserted.rowCount) return inserted.rows[0].id;
@@ -254,13 +284,29 @@ export async function activeSession(deps: StudyDeps, userId: string, groupId: un
 }
 
 // The state a joining client starts from; checks membership of the session's group (I-04).
-export async function sessionForMember(deps: StudyDeps, userId: string, sessionId: unknown): Promise<{ groupId: string; state: PlaybackState }> {
+export async function sessionForMember(deps: StudyDeps, userId: string, sessionId: unknown): Promise<{ groupId: string; state: PlaybackState; startedAt: Date }> {
   if (!isUuid(sessionId)) throw noActiveSession();
   const row = await loadSession(deps.db, sessionId, false);
   if (!row) throw noActiveSession();
   await requireMember(deps.db, userId, row.group_id);
   if (row.status !== 'active') throw noActiveSession();
-  return { groupId: row.group_id, state: toState(row, await effectiveDraft(deps.db, deps.mediaDir, row, deps.clock.now().getTime())) };
+  const state = toState(row, await effectiveDraft(deps.db, deps.mediaDir, row, deps.clock.now().getTime()));
+  return { groupId: row.group_id, state, startedAt: row.started_at };
+}
+
+// S9.1: what the session suggests as the stopping point, and the questions to settle. Works after the session ended,
+// so a member can wrap up once everyone has left; it only reads, and the stopping point changes only on confirmation.
+export async function wrapUp(deps: StudyDeps, userId: string, groupId: unknown, sessionId: unknown): Promise<WrapUpView> {
+  await requireMember(deps.db, userId, groupId);
+  if (!isUuid(sessionId)) throw noActiveSession();
+  const row = await loadSession(deps.db, sessionId, false);
+  if (!row || row.group_id !== groupId) throw noActiveSession();
+  const draft = await effectiveDraft(deps.db, deps.mediaDir, row, deps.clock.now().getTime());
+  const { bookId, chapter, startVerse } = draft.passage;
+  return {
+    suggested: { bookId, chapter, verse: draft.reachedVerse ?? startVerse ?? 1 },
+    openQuestions: await sessionQuestions(deps.db, row.group_id, { bookId, chapter }, row.started_at),
+  };
 }
 
 // ---- commands ----
@@ -472,6 +518,11 @@ export async function applyCommand(
     }
     try {
       if (await applyTo(tx, mediaDir, draft, command, nowMs)) waiting = draft.passage;
+      // Moving to another chapter starts its furthest verse over. Narration reached up to now is already counted; after
+      // the command only a marked verse is, since a seek or a new passage has not been read yet.
+      const moved = draft.passage.bookId !== row.book_id || draft.passage.chapter !== row.chapter;
+      const marked = draft.mode === 'manual' ? verseNow(draft, nowMs) : null;
+      draft.reachedVerse = moved ? marked : furthest(draft.reachedVerse, marked);
     } catch (error) {
       if (!(error instanceof Rejection)) throw error;
       if (command.kind === 'play' && row.mode === 'narration' && !draft.recording) waiting = draft.passage;

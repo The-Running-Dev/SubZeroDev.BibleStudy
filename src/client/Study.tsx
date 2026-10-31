@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { ChapterView, Command, PassageRef, PlaybackState, Presence, QuestionView, RecordingView, ServerMessage, TranslationId, TranslationView } from '../shared/api.ts';
+import type { ChapterView, Command, GroupProgressView, PassageRef, PlaybackState, Presence, QuestionView, RecordingView, ServerMessage, TranslationId, TranslationView } from '../shared/api.ts';
 import { adjacentChapter, bookById } from '../shared/books.ts';
 import { verseAtSeconds } from '../shared/playback.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
@@ -8,9 +8,11 @@ import { ApiFailure, api, messageFor } from './api.ts';
 import { connectLive } from './live.ts';
 import type { Live, LiveStatus } from './live.ts';
 import { Passage } from './Passage.tsx';
-import { applyQuestion, mergeQuestions, pacedBy, reveal, unsettled } from './questions.ts';
+import { formatStop } from './progress.ts';
+import { applyQuestion, mergeQuestions, pacedBy, reveal } from './questions.ts';
 import { AskForm, QuestionList } from './Questions.tsx';
 import { rangeOf, syncStep, targetSeconds } from './sync.ts';
+import { ConfirmStop, WrapUp } from './WrapUp.tsx';
 
 const rates = [0.75, 1, 1.25, 1.5];
 const syncEveryMs = 250;
@@ -18,29 +20,44 @@ const driftEveryMs = 5_000;
 // While the recording is being fetched, ask for a fresh snapshot this often.
 const preparingPollMs = 5_000;
 
-type Entry = { kind: 'checking' } | { kind: 'idle'; active: boolean; error: string | null } | { kind: 'joined'; sessionId: string; state: PlaybackState };
+type Entry = { kind: 'checking' } | { kind: 'idle'; active: boolean; progress: GroupProgressView | null; error: string | null } | { kind: 'joined'; sessionId: string; state: PlaybackState };
 
 // The group's shared study: start or join, then everyone follows one PlaybackState.
 export function Study(props: { groupId: string; userId: string }) {
   const [entry, setEntry] = useState<Entry>({ kind: 'checking' });
+  // The study that just ended here, which can still be wrapped up (S9.4).
+  const [lastSession, setLastSession] = useState<string | null>(null);
+  const [wrappingLast, setWrappingLast] = useState(false);
 
   const check = useCallback(() => {
+    const progress = api
+      .progress(props.groupId)
+      .then((p) => p.progress)
+      .catch(() => null);
     api
       .activeSession(props.groupId)
-      .then(() => setEntry({ kind: 'idle', active: true, error: null }))
-      .catch((error) => {
-        if (error instanceof ApiFailure && error.body.error === 'no_active_session') setEntry({ kind: 'idle', active: false, error: null });
-        else setEntry({ kind: 'idle', active: false, error: messageFor(error) });
+      .then(async () => setEntry({ kind: 'idle', active: true, progress: await progress, error: null }))
+      .catch(async (error) => {
+        const missing = error instanceof ApiFailure && error.body.error === 'no_active_session';
+        setEntry({ kind: 'idle', active: false, progress: await progress, error: missing ? null : messageFor(error) });
       });
   }, [props.groupId]);
   useEffect(check, [check]);
+  const ended = useCallback(
+    (sessionId: string) => {
+      setLastSession(sessionId);
+      check();
+    },
+    [check],
+  );
 
   async function enter() {
     try {
       const { sessionId, state } = await api.startSession(props.groupId);
       setEntry({ kind: 'joined', sessionId, state });
     } catch (error) {
-      setEntry({ kind: 'idle', active: false, error: messageFor(error) });
+      const progress = entry.kind === 'idle' ? entry.progress : null;
+      setEntry({ kind: 'idle', active: false, progress, error: messageFor(error) });
     }
   }
 
@@ -51,12 +68,35 @@ export function Study(props: { groupId: string; userId: string }) {
         {entry.error && <p role="alert">{entry.error}</p>}
         <p>{entry.active ? 'Your group is studying now.' : 'No study is running. Start one and the group can join.'}</p>
         <button type="button" onClick={() => void enter()}>
-          {entry.active ? 'Join study' : 'Start study'}
+          {entry.active ? 'Join study' : entry.progress ? `Resume study at ${formatStop(entry.progress.ref)}` : 'Start study'}
         </button>
+        {!entry.active && (
+          <details className="starting-point">
+            <summary>{entry.progress ? 'Change where the next study starts' : 'Set the starting point'}</summary>
+            <ConfirmStop groupId={props.groupId} initial="" label="Confirm starting point" onConfirmed={check} />
+          </details>
+        )}
+        {!entry.active &&
+          lastSession &&
+          (wrappingLast ? (
+            <WrapUp
+              groupId={props.groupId}
+              sessionId={lastSession}
+              onClose={() => {
+                setWrappingLast(false);
+                setLastSession(null);
+                check();
+              }}
+            />
+          ) : (
+            <button type="button" className="secondary" onClick={() => setWrappingLast(true)}>
+              Wrap up the last study
+            </button>
+          ))}
       </section>
     );
   }
-  return <LiveStudy key={entry.sessionId} groupId={props.groupId} userId={props.userId} sessionId={entry.sessionId} initial={entry.state} onEnded={check} />;
+  return <LiveStudy key={entry.sessionId} groupId={props.groupId} userId={props.userId} sessionId={entry.sessionId} initial={entry.state} onEnded={ended} />;
 }
 
 function statusLine(state: PlaybackState): string {
@@ -89,7 +129,7 @@ function connectionNote(status: LiveStatus): string | null {
   return 'Too many open tabs. Close another tab and reload.';
 }
 
-function LiveStudy(props: { groupId: string; userId: string; sessionId: string; initial: PlaybackState; onEnded: () => void }) {
+function LiveStudy(props: { groupId: string; userId: string; sessionId: string; initial: PlaybackState; onEnded: (sessionId: string) => void }) {
   const { groupId, sessionId, onEnded } = props;
   const [state, setState] = useState<PlaybackState>(props.initial);
   const [presence, setPresence] = useState<Presence[]>([]);
@@ -100,6 +140,9 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
   const [scrub, setScrub] = useState<number | null>(null);
   const [questions, setQuestions] = useState<QuestionView[]>([]);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  const [wrapping, setWrapping] = useState(false);
+  // The server no longer knows the session: it ended while this client was away.
+  const [gone, setGone] = useState(false);
   // Re-renders the position label and slider while playing.
   const [, setNow] = useState(0);
   const live = useRef<Live | null>(null);
@@ -139,7 +182,7 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
           setPresence(message.presence);
           return;
         case 'error':
-          if (message.error === 'no_active_session') onEnded();
+          if (message.error === 'no_active_session') setGone(true);
           else if (message.error !== 'not_member' && message.error !== 'unauthenticated') setNotice(`Something went wrong (${message.error}).`);
           return;
         case 'pong':
@@ -153,7 +196,7 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
       channel.close();
       live.current = null;
     };
-  }, [sessionId, accept, onEnded]);
+  }, [sessionId, accept]);
 
   // Follows the shared state: plays, pauses, corrects drift, and tracks the verse being read.
   useEffect(() => {
@@ -198,33 +241,35 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
     return () => clearInterval(timer);
   }, [waiting, sessionId]);
 
+  // An open wrap-up stays open when the study ends, so a member finishing it loses nothing; it leaves when they close it.
   useEffect(() => {
-    if (state.status === 'ended') onEnded();
-  }, [state.status, onEnded]);
+    if ((state.status === 'ended' || gone) && !wrapping) onEnded(sessionId);
+  }, [state.status, gone, wrapping, sessionId, onEnded]);
 
-  // The questions on the shared chapter, again whenever it changes or a post here changed one.
+  // The questions the study keeps in view (S9.4), again whenever the chapter changes or a post here changed one.
   const { bookId, chapter } = state.passage;
   const [questionsLoad, setQuestionsLoad] = useState(0);
   useEffect(() => {
     let current = true;
     api
-      .questions(groupId, { bookId, chapter, status: unsettled })
-      .then((list) => current && setQuestions((local) => mergeQuestions(local, list, { bookId, chapter })))
+      .wrapUp(groupId, sessionId)
+      .then((view) => current && setQuestions((local) => mergeQuestions(local, view.openQuestions, { bookId, chapter })))
       .catch(() => undefined);
     return () => {
       current = false;
     };
-  }, [groupId, bookId, chapter, questionsLoad]);
+  }, [groupId, sessionId, bookId, chapter, questionsLoad]);
 
-  // Without verse timing there is nothing to pace the questions by, so they are all shown. A new chapter starts over.
+  // Without verse timing there is nothing to pace the questions by, so they are all shown. A new chapter starts over;
+  // questions from other chapters are shown at once.
   const paced = pacedBy(state);
   const chapterKey = `${bookId} ${chapter}`;
   const revealedFor = useRef(chapterKey);
   useEffect(() => {
     const fresh = revealedFor.current !== chapterKey;
     revealedFor.current = chapterKey;
-    setShown((previous) => reveal(questions, paced ? verse : Number.MAX_SAFE_INTEGER, fresh ? new Set() : previous));
-  }, [questions, verse, chapterKey, paced]);
+    setShown((previous) => reveal(questions, paced ? verse : Number.MAX_SAFE_INTEGER, fresh ? new Set() : previous, { bookId, chapter }));
+  }, [questions, verse, chapterKey, paced, bookId, chapter]);
   const visible = questions.filter((q) => shown.has(q.id));
 
   function send(command: Command) {
@@ -321,7 +366,7 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
           <section className="questions" aria-label="Questions">
             <h2>Questions</h2>
             <div aria-live="polite">
-              <QuestionList groupId={groupId} userId={props.userId} questions={visible} onChanged={() => setQuestionsLoad((n) => n + 1)} empty="No questions on this chapter yet." />
+              <QuestionList groupId={groupId} userId={props.userId} questions={visible} onChanged={() => setQuestionsLoad((n) => n + 1)} empty="No open questions yet." />
             </div>
             <AskForm
               groupId={groupId}
@@ -334,9 +379,22 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
               }}
             />
           </section>
-          <button type="button" className="secondary" onClick={() => send({ kind: 'end_session' })}>
-            End study
-          </button>
+          {wrapping ? (
+            <WrapUp groupId={groupId} sessionId={sessionId} onClose={() => setWrapping(false)} />
+          ) : (
+            <button type="button" onClick={() => setWrapping(true)}>
+              Wrap up
+            </button>
+          )}
+          {state.status === 'ended' ? (
+            <p className="player-note" role="status">
+              This study has ended. Choose Done when the wrap-up is finished.
+            </p>
+          ) : (
+            <button type="button" className="secondary" onClick={() => send({ kind: 'end_session' })}>
+              End study
+            </button>
+          )}
         </div>
       </StudyPassage>
     </section>

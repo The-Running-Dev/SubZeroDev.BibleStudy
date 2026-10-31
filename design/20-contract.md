@@ -250,10 +250,12 @@ function driftReport(groupId: Uuid, sessionId: Uuid): Promise<{ samples: number;
 
 ```ts
 // GET /api/groups/:groupId/progress
-function currentStoppingPoint(groupId: Uuid): Promise<{ id: Uuid; ref: { bookId: BookId; chapter: number; verse: number }; confirmedBy: string; confirmedAt: IsoInstant } | null>;
+function currentStoppingPoint(groupId: Uuid): Promise<{ progress: { id: Uuid; ref: { bookId: BookId; chapter: number; verse: number }; confirmedBy: string; confirmedAt: IsoInstant } | null }>;
 // POST /api/groups/:groupId/progress
+// 201; stale_progress (409) with details.current when basedOnId is not the current stopping point's id.
 function confirmStoppingPoint(groupId: Uuid, body: { basedOnId: Uuid | null; ref: { bookId: BookId; chapter: number; verse: number }; sessionId?: Uuid }): Promise<{ id: Uuid }>;
-// GET /api/groups/:groupId/session/:sessionId/wrap-up
+// GET /api/groups/:groupId/session/:sessionId/wrap-up (also after the session ended). openQuestions: the open and carried
+// questions on the session's chapter, every carried one, and any posted since the session started.
 function wrapUpSuggestion(groupId: Uuid, sessionId: Uuid): Promise<{ suggested: { bookId: BookId; chapter: number; verse: number }; openQuestions: QuestionView[] }>;
 ```
 
@@ -273,8 +275,9 @@ function postReply(groupId: Uuid, questionId: Uuid, body: { clientOpId: Uuid; bo
 // PATCH / DELETE on questions/:id and replies/:id (author only)
 function editPost(groupId: Uuid, target: { questionId: Uuid } | { replyId: Uuid }, body: { expectedRevision: number; body: string }): Promise<QuestionView | ReplyView>;
 function deletePost(groupId: Uuid, target: { questionId: Uuid } | { replyId: Uuid }): Promise<{ outcome: 'deleted' | 'body_removed' }>;
-// POST .../questions/:id/disposition (any member, during or after a session)
-function setDisposition(groupId: Uuid, questionId: Uuid, body: { status: 'closed' | 'carried' | 'resolved' | 'no_longer_relevant'; sessionId?: Uuid }): Promise<QuestionView>;
+// POST .../questions/:id/disposition (any member, during or after a session). `version` is the question's version the member decided on;
+// stale_revision (409) with details.current when it has changed since.
+function setDisposition(groupId: Uuid, questionId: Uuid, body: { status: 'closed' | 'carried' | 'resolved' | 'no_longer_relevant'; version: number; sessionId?: Uuid }): Promise<QuestionView>;
 ```
 
 ### personal
@@ -425,11 +428,11 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `no_active_session` (404): ended or never started. Retry: no.
 
 **progress**
-- `stale_progress` (409): someone confirmed first. Retry: no. Show their choice.
+- `stale_progress` (409): someone confirmed first. Retry: no. Show their choice; the member may confirm again on it.
 
 **questions**
 - `not_author` (403): editing or deleting someone else's post. Retry: no.
-- `stale_revision` (409): edited since loaded. Retry: no.
+- `stale_revision` (409): edited or decided since loaded. Retry: no. Show `details.current`; the member may decide again on it.
 - `empty_body` (400): blank body. Retry: no.
 
 **personal**

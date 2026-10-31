@@ -1,5 +1,5 @@
-import type { PassageRef, PostQuestionRequest, QuestionStatus, QuestionView, ReplyView, TranslationId } from '../../shared/api.ts';
-import { questionStatuses } from '../../shared/api.ts';
+import type { Disposition, PassageRef, PostQuestionRequest, QuestionStatus, QuestionView, ReplyView, TranslationId } from '../../shared/api.ts';
+import { dispositions, questionStatuses } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { requireMember } from '../groups/groups.ts';
 import type { Clock } from '../platform/clock.ts';
@@ -194,6 +194,50 @@ export async function questionsFor(q: Queryable, groupId: string, filter: Questi
     [groupId, filter.bookId ?? null, filter.chapter ?? null, filter.status ?? null],
   );
   return withReplies(q, result.rows);
+}
+
+// The questions a study keeps in view (S9.4): the unsettled ones on its chapter, those posted since it started (wherever
+// the passage has moved since), and every carried one, so a carried question comes back in the next study.
+export async function sessionQuestions(q: Queryable, groupId: string, at: { bookId: string; chapter: number }, since: Date): Promise<QuestionView[]> {
+  const result = await q.query<QuestionRow>(
+    `SELECT ${questionColumns} FROM questions q JOIN users u ON u.id = q.author_id
+      WHERE q.group_id = $1 AND q.status IN ('open', 'carried')
+        AND ((q.book_id = $2 AND q.chapter = $3) OR q.status = 'carried' OR q.created_at >= $4)
+        AND (q.body IS NOT NULL OR EXISTS (SELECT 1 FROM replies r WHERE r.question_id = q.id AND r.body IS NOT NULL))
+      ORDER BY q.book_id, q.chapter, q.start_verse NULLS FIRST, q.end_verse NULLS FIRST, q.created_at, q.id`,
+    [groupId, at.bookId, at.chapter, since],
+  );
+  return withReplies(q, result.rows);
+}
+
+// S9.4: any member settles a question, during a study or after it. Each decision is kept in question_dispositions;
+// the question's status is the latest one, and its version rises so every client takes the change.
+export async function setDisposition(deps: QuestionDeps, userId: string, groupId: unknown, questionId: unknown, request: unknown): Promise<QuestionView> {
+  await requireMember(deps.db, userId, groupId);
+  const r = (request ?? {}) as Record<string, unknown>;
+  if (!(dispositions as readonly unknown[]).includes(r.status)) throw invalid('Status must be closed, carried, resolved or no_longer_relevant.');
+  const status = r.status as Disposition;
+  if (!Number.isInteger(r.version)) throw invalid('A decision needs the version of the question it was made on.');
+  if (r.sessionId !== undefined && r.sessionId !== null && !isUuid(r.sessionId)) throw invalid('Unknown session.');
+  const sessionId = (r.sessionId as string | null | undefined)?.toLowerCase() ?? null;
+  if (!isUuid(questionId)) throw notFound();
+  const group = groupId as string;
+  return withTransaction(deps.db, async (tx) => {
+    const question = await loadQuestion(tx, group, questionId, ' FOR UPDATE OF q');
+    if (!question) throw notFound();
+    if (question.version !== r.version) throw staleRevision((await questionView(tx, group, questionId))!);
+    if (sessionId) {
+      const owned = await tx.query('SELECT 1 FROM study_sessions WHERE id = $1 AND group_id = $2', [sessionId, group]);
+      if (!owned.rowCount) throw invalid('Unknown session.');
+    }
+    const now = deps.clock.now();
+    await tx.query(
+      `INSERT INTO question_dispositions (id, question_id, session_id, status, decided_by, decided_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [uuidv7(now.getTime()), questionId, sessionId, status, userId, now],
+    );
+    await tx.query('UPDATE questions SET status = $2, version = version + 1 WHERE id = $1', [questionId, status]);
+    return (await questionView(tx, group, questionId))!;
+  });
 }
 
 // A retry with the same clientOpId returns the question the first attempt created (S8.2).

@@ -11,7 +11,7 @@ export interface ChapterAt {
   chapter: number;
 }
 
-const statusLabels: Record<QuestionStatus, string> = {
+export const statusLabels: Record<QuestionStatus, string> = {
   open: 'Open',
   carried: 'Carried over',
   resolved: 'Resolved',

@@ -163,7 +163,7 @@ Acceptance:
 Out of scope: wrap-up dispositions (S9); offline drafts (S15).
 
 ## S9 — Wrap up and resume where the group stopped
-Status: todo
+Status: done
 Delivers: At the end of a study, the group confirms where it stopped and settles each open question. Next time, Resume study opens exactly there with carried questions back in view.
 Touches: progress (`currentStoppingPoint`, `confirmStoppingPoint`, `wrapUpSuggestion`), questions (`setDisposition`), client wrap-up and Resume study
 Depends on: S8

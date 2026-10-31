@@ -95,7 +95,7 @@ async function openStudy(who: keyof typeof people, options: { switchable?: boole
   }
   await page.goto(baseUrl);
   await page.getByRole('button', { name: 'Study', exact: true }).click();
-  await page.getByRole('button', { name: /^(Start|Join) study$/ }).click();
+  await page.getByRole('button', { name: /^(Start study|Join study|Resume study at)/ }).click();
   await page.getByTestId('study-status').waitFor();
   await page.waitForFunction(() => document.querySelector('.study-connection') === null, undefined, { timeout: 10_000 });
   await page.locator('audio').waitFor({ state: 'attached' });
@@ -216,5 +216,77 @@ describe('studying together', () => {
     if (process.env.E2E_SCREENSHOTS) await mark.page.screenshot({ path: `${process.env.E2E_SCREENSHOTS}/study-manual.png` });
     const row = await h.db.query(`SELECT mode, translation_id, manual_verse FROM study_sessions WHERE status = 'active'`);
     assert.deepEqual(row.rows[0], { mode: 'manual', translation_id: 'CSB', manual_verse: 12 });
+  });
+});
+
+describe('wrapping up', () => {
+  beforeEach(async () => {
+    await h.db.query('DELETE FROM group_progress');
+    await h.db.query(`UPDATE groups SET shared_translation_id = 'BSB'`);
+  });
+
+  test('S9.1–S9.4 two members wrap up: the later confirmation is shown the earlier one, a question is carried, and the next study resumes there with it', async () => {
+    const asked = await h.app.inject({
+      method: 'POST',
+      url: `/api/groups/${groupId}/questions`,
+      cookies: { bs_session: people.mark.cookie },
+      payload: { clientOpId: crypto.randomUUID(), anchor: { translationId: 'BSB', bookId: 'ROM', chapter: 1, startVerse: 3, endVerse: 3 }, body: 'Descended from David how?' },
+    });
+    assert.equal(asked.statusCode, 200, asked.body);
+    const questionId = asked.json().id as string;
+    const olive = await openStudy('olive');
+    const mark = await openStudy('mark');
+    for (const client of [olive, mark]) {
+      await client.page.getByRole('button', { name: 'Wrap up', exact: true }).click();
+      await client.page.getByRole('button', { name: 'Confirm stopping point' }).waitFor();
+      await client.page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('.wrap-up button[type="submit"]')!.disabled);
+    }
+
+    const item = olive.page.locator(`[data-testid="wrap-question"][data-question="${questionId}"]`);
+    await item.getByRole('button', { name: 'Carry forward' }).click();
+    await item.locator('button[aria-pressed="true"]', { hasText: 'Carry forward' }).waitFor();
+    assert.equal((await h.db.query('SELECT status FROM questions WHERE id = $1', [questionId])).rows[0].status, 'carried');
+
+    await olive.page.getByLabel('Stopping point').fill('Romans 1:11');
+    await olive.page.getByRole('button', { name: 'Confirm stopping point' }).click();
+    await olive.page.getByRole('status').filter({ hasText: 'Saved: the next study starts at Romans 1:11.' }).waitFor();
+
+    await mark.page.getByLabel('Stopping point').fill('Romans 1:7');
+    await mark.page.getByRole('button', { name: 'Confirm stopping point' }).click();
+    await mark.page.getByRole('alert').filter({ hasText: 'Olive confirmed Romans 1:11 first. Confirm again to replace it.' }).waitFor();
+    await mark.page.getByText('Current stopping point: Romans 1:11, confirmed by Olive.').waitFor();
+    await mark.page.getByRole('button', { name: 'Confirm stopping point' }).click();
+    await mark.page.getByRole('status').filter({ hasText: 'Saved: the next study starts at Romans 1:7.' }).waitFor();
+    if (process.env.E2E_SCREENSHOTS) await mark.page.screenshot({ path: `${process.env.E2E_SCREENSHOTS}/study-wrap-up.png`, fullPage: true });
+
+    // Ending the study keeps an open wrap-up; it leaves when its member is done with it.
+    await olive.page.getByRole('button', { name: 'End study' }).click();
+    await olive.page.getByRole('status').filter({ hasText: 'This study has ended.' }).waitFor();
+    assert.ok(await olive.page.getByLabel('Stopping point').isVisible(), 'the wrap-up stays open after the study ends');
+    await olive.page.getByRole('button', { name: 'Done' }).click();
+    const resume = olive.page.getByRole('button', { name: 'Resume study at Romans 1:7' });
+    await resume.waitFor();
+    await resume.click();
+    await olive.page.getByTestId('study-status').waitFor();
+    const verse7 = (await h.db.query(`SELECT (timing->>6)::float AS t FROM recordings WHERE book_id = 'ROM' AND chapter = 1`)).rows[0].t as number;
+    await olive.page.waitForFunction((seconds) => Math.abs(document.querySelector('audio')!.currentTime - seconds) < 0.25, verse7, { timeout: 10_000 });
+    await olive.page.locator(`[data-testid="question"][data-question="${questionId}"]`).waitFor();
+  });
+
+  test('S9.5 with no study running, a member sets where the next one starts', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    contexts.push(context);
+    await context.addCookies([{ name: 'bs_session', value: people.ruth.cookie, url: baseUrl }]);
+    const page = await context.newPage();
+    await page.goto(baseUrl);
+    await page.getByRole('button', { name: 'Study', exact: true }).click();
+    await page.getByRole('button', { name: 'Start study' }).waitFor();
+    await page.getByText('Set the starting point').click();
+    await page.getByLabel('Stopping point').fill('Romans 3:1');
+    await page.getByRole('button', { name: 'Confirm starting point' }).click();
+    await page.getByRole('button', { name: 'Resume study at Romans 3:1' }).waitFor();
+    await page.getByText('Change where the next study starts').waitFor();
+    const row = await h.db.query('SELECT book_id, chapter, verse, confirmed_by FROM group_progress');
+    assert.deepEqual(row.rows, [{ book_id: 'ROM', chapter: 3, verse: 1, confirmed_by: people.ruth.userId }]);
   });
 });
