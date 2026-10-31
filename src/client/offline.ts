@@ -1,7 +1,19 @@
 // What this device keeps for reading with no connection (S14): chapters in IndexedDB, narration audio in Cache Storage.
 // Everything is keyed by the signed-in user, so one browser shared by two members keeps their downloads apart.
 // A download is ready only once every asset's bytes match the hash the server named (I-27); anything else is removed.
-import type { BookId, ChapterView, DownloadManifest, IsoInstant, RecordingView, RecordingsResponse, TranslationId, TranslationView, Uuid } from '../shared/api.ts';
+import type {
+  ApiError,
+  BookId,
+  ChapterView,
+  DownloadManifest,
+  IsoInstant,
+  RecordingView,
+  RecordingsResponse,
+  TranslationId,
+  TranslationView,
+  Uuid,
+} from '../shared/api.ts';
+import { ApiFailure } from './api.ts';
 
 export type DownloadState =
   | { state: 'absent' }
@@ -21,6 +33,7 @@ interface DownloadRecord extends ChapterRef {
   id: string;
   withNarration: boolean;
   chapterBody: string;
+  chapterAsset?: { sha256: string; bytes: number };
   translation: TranslationView | null;
   recording: RecordingView | null;
   audio: { url: string; sha256: string; bytes: number } | null;
@@ -54,7 +67,9 @@ export function openDb(): Promise<IDBDatabase> {
   opening ??= new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(dbName, 1);
     req.onupgradeneeded = () => {
-      for (const name of stores) if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: ['userId', 'id'] });
+      for (const name of stores)
+        if (!req.result.objectStoreNames.contains(name))
+          req.result.createObjectStore(name, { keyPath: ['userId', 'id'] });
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -77,15 +92,39 @@ async function store(name: string, mode: IDBTransactionMode): Promise<IDBObjectS
   return (await openDb()).transaction(name, mode).objectStore(name);
 }
 
+// A successful request can still be rolled back. Publish readiness only after the transaction commits.
+async function writeDownload(work: (store: IDBObjectStore) => void): Promise<void> {
+  const tx = (await openDb()).transaction('downloads', 'readwrite');
+  const completed = new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('Download storage transaction aborted.'));
+    tx.onerror = () => reject(tx.error ?? new Error('Download storage failed.'));
+  });
+  try {
+    work(tx.objectStore('downloads'));
+  } catch (error) {
+    tx.abort();
+    await completed.catch(() => undefined);
+    throw error;
+  }
+  await completed;
+}
+
 const idOf = (ref: ChapterRef) => `${ref.translationId}/${ref.bookId}/${ref.chapter}`;
 
 async function getRecord(userId: Uuid, ref: ChapterRef): Promise<DownloadRecord | undefined> {
-  return request((await store('downloads', 'readonly')).get([userId, idOf(ref)]) as IDBRequest<DownloadRecord | undefined>);
+  return request(
+    (await store('downloads', 'readonly')).get([userId, idOf(ref)]) as IDBRequest<
+      DownloadRecord | undefined
+    >
+  );
 }
 
 async function allRecords(userId: Uuid): Promise<DownloadRecord[]> {
   const range = IDBKeyRange.bound([userId, ''], [userId, '￿']);
-  return request((await store('downloads', 'readonly')).getAll(range) as IDBRequest<DownloadRecord[]>);
+  return request(
+    (await store('downloads', 'readonly')).getAll(range) as IDBRequest<DownloadRecord[]>
+  );
 }
 
 async function everyRecord(): Promise<DownloadRecord[]> {
@@ -100,14 +139,25 @@ async function hex(bytes: ArrayBuffer): Promise<string> {
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal });
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(body?.message ?? `The server answered ${response.status}.`);
+    const body = (await response.json().catch(() => null)) as ApiError | null;
+    throw new ApiFailure(
+      response.status,
+      body ?? {
+        error: 'internal',
+        message: `The server answered ${response.status}.`,
+        retryable: false,
+      }
+    );
   }
   return (await response.json()) as T;
 }
 
 // Reads a body chunk by chunk so the progress bar moves with the bytes actually received.
-async function readBody(url: string, signal: AbortSignal, onBytes: (n: number) => void): Promise<ArrayBuffer> {
+async function readBody(
+  url: string,
+  signal: AbortSignal,
+  onBytes: (n: number) => void
+): Promise<ArrayBuffer> {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal });
   if (!response.ok || !response.body) throw new Error(`The server answered ${response.status}.`);
   const reader = response.body.getReader();
@@ -129,11 +179,19 @@ async function readBody(url: string, signal: AbortSignal, onBytes: (n: number) =
   return joined.buffer;
 }
 
-async function audioReferenced(url: string, except: { userId: Uuid; id: string } | null): Promise<boolean> {
-  return (await everyRecord()).some((r) => r.audio?.url === url && !(except && r.userId === except.userId && r.id === except.id));
+async function audioReferenced(
+  url: string,
+  except: { userId: Uuid; id: string } | null
+): Promise<boolean> {
+  return (await everyRecord()).some(
+    (r) => r.audio?.url === url && !(except && r.userId === except.userId && r.id === except.id)
+  );
 }
 
-async function releaseAudio(url: string, except: { userId: Uuid; id: string } | null): Promise<void> {
+async function releaseAudio(
+  url: string,
+  except: { userId: Uuid; id: string } | null
+): Promise<void> {
   if (await audioReferenced(url, except)) return;
   await (await caches.open(mediaCache)).delete(url);
 }
@@ -151,10 +209,18 @@ export function formatBytes(bytes: number): string {
 }
 
 export function storageAvailable(): boolean {
-  return typeof indexedDB !== 'undefined' && typeof caches !== 'undefined' && typeof crypto?.subtle !== 'undefined';
+  return (
+    typeof indexedDB !== 'undefined' &&
+    typeof caches !== 'undefined' &&
+    typeof crypto?.subtle !== 'undefined'
+  );
 }
 
-export async function downloadManifest(ref: ChapterRef, withNarration: boolean, signal?: AbortSignal): Promise<DownloadManifest> {
+export async function downloadManifest(
+  ref: ChapterRef,
+  withNarration: boolean,
+  signal?: AbortSignal
+): Promise<DownloadManifest> {
   const url = `/api/content/${ref.translationId}/${ref.bookId}/${ref.chapter}/download-manifest${withNarration ? '?narration=true' : ''}`;
   return getJson<DownloadManifest>(url, signal ?? new AbortController().signal);
 }
@@ -164,44 +230,102 @@ export async function downloadChapter(
   ref: ChapterRef,
   withNarration: boolean,
   signal: AbortSignal,
-  onProgress?: (state: DownloadState) => void,
+  onProgress?: (state: DownloadState) => void
 ): Promise<DownloadState> {
-  if (!storageAvailable()) return { state: 'failed', reason: 'This browser cannot keep chapters for offline reading.' };
+  if (!storageAvailable())
+    return { state: 'failed', reason: 'This browser cannot keep chapters for offline reading.' };
   const id = idOf(ref);
   const run = async (): Promise<DownloadState> => {
     let addedAudio: string | null = null;
     try {
       void navigator.storage?.persist?.().catch(() => false);
       const manifest = await downloadManifest(ref, withNarration, signal);
-      const listing = withNarration ? await getJson<RecordingsResponse>(`/api/content/${ref.translationId}/${ref.bookId}/${ref.chapter}/recordings`, signal) : null;
+      const chapterAsset = manifest.assets.find((a) => a.kind === 'chapter');
+      if (
+        !chapterAsset ||
+        manifest.assets.filter((a) => a.kind === 'chapter').length !== 1 ||
+        manifest.assets.filter((a) => a.kind === 'audio').length !== Number(withNarration) ||
+        manifest.assets.some(
+          (a) => !Number.isSafeInteger(a.bytes) || a.bytes <= 0 || !/^[a-f0-9]{64}$/.test(a.sha256)
+        ) ||
+        manifest.totalBytes !== manifest.assets.reduce((n, a) => n + a.bytes, 0)
+      ) {
+        throw new Error('The download manifest is incomplete; try again.');
+      }
+      if (
+        (manifest.expiresAt !== null &&
+          (!Number.isFinite(Date.parse(manifest.expiresAt)) ||
+            Date.parse(manifest.expiresAt) <= Date.now())) ||
+        (ref.translationId === 'CSB' && manifest.expiresAt === null)
+      ) {
+        throw new Error('This download has expired — connect to download it again.');
+      }
+      const listing = withNarration
+        ? await getJson<RecordingsResponse>(
+            `/api/content/${ref.translationId}/${ref.bookId}/${ref.chapter}/recordings`,
+            signal
+          )
+        : null;
       const translations = await getJson<TranslationView[]>('/api/content/translations', signal);
       const audioAsset = manifest.assets.find((a) => a.kind === 'audio') ?? null;
-      const recording = audioAsset ? (listing?.recordings.find((r) => r.mediaUrl === audioAsset.url) ?? null) : null;
-      if (audioAsset && !recording) throw new Error('The narration changed while downloading; try again.');
+      const recording = audioAsset
+        ? (listing?.recordings.find((r) => r.mediaUrl === audioAsset.url) ?? null)
+        : null;
+      if (audioAsset && !recording)
+        throw new Error('The narration changed while downloading; try again.');
 
       let doneBytes = 0;
       const tick = (n: number) => {
         doneBytes += n;
-        onProgress?.({ state: 'downloading', doneBytes: Math.min(doneBytes, manifest.totalBytes), totalBytes: manifest.totalBytes });
+        onProgress?.({
+          state: 'downloading',
+          doneBytes: Math.min(doneBytes, manifest.totalBytes),
+          totalBytes: manifest.totalBytes,
+        });
       };
       onProgress?.({ state: 'downloading', doneBytes: 0, totalBytes: manifest.totalBytes });
 
       let chapterBody = '';
       const cache = await caches.open(mediaCache);
       for (const asset of manifest.assets) {
-        if (asset.kind === 'audio' && (await cache.match(asset.url))) {
-          tick(asset.bytes);
-          continue;
+        if (asset.kind === 'audio') {
+          const cached = await cache.match(asset.url);
+          if (cached) {
+            const bytes = await cached.arrayBuffer();
+            if (bytes.byteLength !== asset.bytes || (await hex(bytes)) !== asset.sha256) {
+              await cache.delete(asset.url);
+              throw new Error('Stored narration failed integrity verification; download it again.');
+            }
+            tick(asset.bytes);
+            continue;
+          }
         }
         const bytes = await readBody(asset.url, signal, tick);
-        if (bytes.byteLength !== asset.bytes || (await hex(bytes)) !== asset.sha256) throw new Error('A downloaded file did not match what the server sent; try again.');
+        if (bytes.byteLength !== asset.bytes || (await hex(bytes)) !== asset.sha256)
+          throw new Error('A downloaded file did not match what the server sent; try again.');
         if (asset.kind === 'chapter') chapterBody = new TextDecoder().decode(bytes);
         else {
-          await cache.put(asset.url, new Response(bytes, { headers: { 'content-type': 'audio/mpeg', 'content-length': String(bytes.byteLength) } }));
+          await cache.put(
+            asset.url,
+            new Response(bytes, {
+              headers: { 'content-type': 'audio/mpeg', 'content-length': String(bytes.byteLength) },
+            })
+          );
           addedAudio = asset.url;
         }
       }
       signal.throwIfAborted();
+      const chapter = JSON.parse(chapterBody) as ChapterView;
+      if (
+        chapter.translationId !== ref.translationId ||
+        chapter.bookId !== ref.bookId ||
+        chapter.chapter !== ref.chapter ||
+        chapter.expiresAt !== manifest.expiresAt
+      ) {
+        throw new Error('The chapter changed while downloading; try again.');
+      }
+      if (manifest.expiresAt !== null && Date.parse(manifest.expiresAt) <= Date.now())
+        throw new Error('This download expired before it finished; try again.');
 
       const record: DownloadRecord = {
         userId,
@@ -209,33 +333,48 @@ export async function downloadChapter(
         ...ref,
         withNarration: audioAsset !== null,
         chapterBody,
+        chapterAsset: { sha256: chapterAsset.sha256, bytes: chapterAsset.bytes },
         translation: translations.find((t) => t.id === ref.translationId) ?? null,
         recording,
-        audio: audioAsset ? { url: audioAsset.url, sha256: audioAsset.sha256, bytes: audioAsset.bytes } : null,
+        audio: audioAsset
+          ? { url: audioAsset.url, sha256: audioAsset.sha256, bytes: audioAsset.bytes }
+          : null,
         expiresAt: manifest.expiresAt,
         totalBytes: manifest.totalBytes,
         savedAt: new Date().toISOString(),
       };
       const previous = await getRecord(userId, ref);
-      await request((await store('downloads', 'readwrite')).put(record));
+      await writeDownload((s) => s.put(record));
       // Downloading text only over an earlier download with narration drops the audio it no longer needs.
-      if (previous?.audio && previous.audio.url !== record.audio?.url) await releaseAudio(previous.audio.url, null);
+      if (previous?.audio && previous.audio.url !== record.audio?.url)
+        await releaseAudio(previous.audio.url, null);
       // Audio skipped as already cached can still be released by a failing download before this record was written.
-      if (await evicted(record)) {
-        await request((await store('downloads', 'readwrite')).delete([userId, id]));
-        throw new Error('The narration was removed while downloading; try again.');
+      if (isExpired(record) || await evicted(record)) {
+        await writeDownload((s) => s.delete([userId, id]));
+        throw new Error('The download expired or its stored assets failed verification; try again.');
       }
       return { state: 'ready', expiresAt: record.expiresAt, withNarration: record.withNarration };
     } catch (error) {
       if (addedAudio) await releaseAudio(addedAudio, null).catch(() => undefined);
-      const reason = signal.aborted ? 'Download cancelled.' : error instanceof TypeError ? 'The connection dropped during the download.' : error instanceof Error ? error.message : 'The download failed.';
+      const reason = signal.aborted
+        ? 'Download cancelled.'
+        : error instanceof TypeError
+          ? 'The connection dropped during the download.'
+          : error instanceof Error
+            ? error.message
+            : 'The download failed.';
       return { state: 'failed', reason };
     }
   };
   // One download per chapter at a time, across this browser's windows.
   if (!navigator.locks) return run();
   return navigator.locks.request(`download ${userId} ${id}`, { ifAvailable: true }, (lock) =>
-    lock ? withMediaLock('shared', run) : Promise.resolve<DownloadState>({ state: 'failed', reason: 'This chapter is already downloading in another window.' }),
+    lock
+      ? withMediaLock('shared', run)
+      : Promise.resolve<DownloadState>({
+          state: 'failed',
+          reason: 'This chapter is already downloading in another window.',
+        })
   );
 }
 
@@ -243,22 +382,41 @@ export function removeDownload(userId: Uuid, ref: ChapterRef): Promise<void> {
   return withMediaLock('exclusive', async () => {
     const record = await getRecord(userId, ref);
     if (!record) return;
-    await request((await store('downloads', 'readwrite')).delete([userId, record.id]));
+    await writeDownload((s) => s.delete([userId, record.id]));
     if (record.audio) await releaseAudio(record.audio.url, null);
   });
 }
 
 async function evicted(record: DownloadRecord): Promise<boolean> {
-  return record.audio !== null && !(await (await caches.open(mediaCache)).match(record.audio.url));
+  if (record.chapterAsset) {
+    const bytes = new TextEncoder().encode(record.chapterBody);
+    if (
+      bytes.byteLength !== record.chapterAsset.bytes ||
+      (await hex(bytes.buffer)) !== record.chapterAsset.sha256
+    )
+      return true;
+  }
+  if (!record.audio) return false;
+  const cached = await (await caches.open(mediaCache)).match(record.audio.url);
+  if (!cached) return true;
+  const bytes = await cached.arrayBuffer();
+  return bytes.byteLength !== record.audio.bytes || (await hex(bytes)) !== record.audio.sha256;
 }
 
-const isExpired = (record: DownloadRecord) => record.expiresAt !== null && Date.parse(record.expiresAt) <= Date.now();
+const isExpired = (record: DownloadRecord) =>
+  record.expiresAt !== null
+    ? !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= Date.now()
+    : record.translationId === 'CSB';
 
 // Licensed text is kept no longer than the server may keep it (I-11): an expired download keeps only its listing.
 async function expire(record: DownloadRecord): Promise<void> {
   if (record.chapterBody === '' && record.audio === null) return;
   await withMediaLock('exclusive', async () => {
-    await request((await store('downloads', 'readwrite')).put({ ...record, chapterBody: '', audio: null, recording: null }));
+    // A download may have refreshed this entry while we waited for the media lock.
+    const latest = await getRecord(record.userId, record);
+    if (!latest || !isExpired(latest)) return;
+    record = latest;
+    await writeDownload((s) => s.put({ ...record, chapterBody: '', audio: null, recording: null }));
     if (record.audio) await releaseAudio(record.audio.url, null);
   });
 }
@@ -273,7 +431,7 @@ export async function downloadState(userId: Uuid, ref: ChapterRef): Promise<Down
   }
   // The browser may clear cached audio under storage pressure; a half-kept download is not offered.
   if (await evicted(record)) {
-    await request((await store('downloads', 'readwrite')).delete([userId, record.id]));
+    await removeDownload(userId, ref);
     return { state: 'absent' };
   }
   return { state: 'ready', expiresAt: record.expiresAt, withNarration: record.withNarration };
@@ -298,7 +456,19 @@ export async function listDownloads(userId: Uuid): Promise<DownloadSummary[]> {
   return kept;
 }
 
-export async function offlineChapter(userId: Uuid, ref: ChapterRef): Promise<OfflineChapter | 'expired' | null> {
+// Offline navigation must offer downloaded translations even when the translations API cannot answer.
+export async function downloadedTranslations(userId: Uuid): Promise<TranslationView[]> {
+  if (!storageAvailable()) return [];
+  const translations = new Map<TranslationId, TranslationView>();
+  for (const record of await allRecords(userId))
+    if (record.translation) translations.set(record.translationId, record.translation);
+  return [...translations.values()];
+}
+
+export async function offlineChapter(
+  userId: Uuid,
+  ref: ChapterRef
+): Promise<OfflineChapter | 'expired' | null> {
   if (!storageAvailable()) return null;
   const record = await getRecord(userId, ref);
   if (!record) return null;
@@ -306,12 +476,21 @@ export async function offlineChapter(userId: Uuid, ref: ChapterRef): Promise<Off
     await expire(record);
     return 'expired';
   }
+  if (await evicted(record)) {
+    await removeDownload(userId, ref);
+    return null;
+  }
   let audioUrl: string | null = null;
   if (record.audio) {
     const cached = await (await caches.open(mediaCache)).match(record.audio.url);
     if (cached) audioUrl = URL.createObjectURL(await cached.blob());
   }
-  return { chapter: JSON.parse(record.chapterBody) as ChapterView, translation: record.translation, recording: audioUrl ? record.recording : null, audioUrl };
+  return {
+    chapter: JSON.parse(record.chapterBody) as ChapterView,
+    translation: record.translation,
+    recording: audioUrl ? record.recording : null,
+    audioUrl,
+  };
 }
 
 // The last profile the server confirmed, so a start with no connection can still open the member's downloads.

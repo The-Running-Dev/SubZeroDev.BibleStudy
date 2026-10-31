@@ -8,7 +8,7 @@ import { AssistantPanel } from './Assistant.tsx';
 import { Download } from './Download.tsx';
 import { reportFums } from './fums.ts';
 import { Notes, inChapter } from './Notes.tsx';
-import { offlineChapter } from './offline.ts';
+import { downloadedTranslations, downloadState, offlineChapter } from './offline.ts';
 import type { OfflineChapter } from './offline.ts';
 import { localPersonal, savePosition as storePosition, sync } from './outbox.ts';
 import type { Personal } from './outbox.ts';
@@ -167,7 +167,7 @@ export function Reader(props: { groupId: string | null; userId: string }) {
     api
       .translations()
       .then(setTranslations)
-      .catch(() => setTranslations([]));
+      .catch(() => downloadedTranslations(props.userId).then(setTranslations).catch(() => setTranslations([])));
   }, []);
 
   useEffect(() => {
@@ -198,6 +198,34 @@ export function Reader(props: { groupId: string | null; userId: string }) {
   }, [translationId, at.bookId, at.chapter, props.userId]);
 
   const shown = text.kind === 'ready' && text.chapter.bookId === at.bookId && text.chapter.chapter === at.chapter ? text.chapter : null;
+
+  // An already open reader must stop displaying licensed text when its lease ends, including after phone sleep.
+  useEffect(() => {
+    if (!shown?.expiresAt) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const expires = Date.parse(shown.expiresAt);
+    const check = () => {
+      const remaining = expires - Date.now();
+      if (!Number.isFinite(remaining) || remaining <= 0) {
+        setText({
+          kind: 'unavailable',
+          message: 'The download of this chapter has expired — connect to download it again.',
+        });
+        void downloadState(props.userId, shown).catch(() => undefined);
+      } else {
+        clearTimeout(timer);
+        timer = setTimeout(check, Math.min(remaining, 2_147_483_647));
+      }
+    };
+    check();
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [shown, props.userId]);
 
   // S13.6: each display of CSB text is reported to API.Bible.
   const fumsToken = shown?.fums?.token;
@@ -255,7 +283,7 @@ export function Reader(props: { groupId: string | null; userId: string }) {
             }}
             aria-label="Translation"
           >
-            {(translations.length ? translations.map((t) => t.id) : [...new Set<TranslationId>(['BSB', translationId])]).map((id) => (
+            {[...new Set<TranslationId>(['BSB', ...translations.map((t) => t.id), translationId])].map((id) => (
               <option key={id} value={id}>
                 {id}
               </option>

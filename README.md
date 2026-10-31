@@ -74,6 +74,8 @@ Without it, that file is skipped.
 
 `npm run test:e2e` drives the built client in headless Chromium at phone size. Run `npm run build` and, once, `npx playwright install chromium` first. Set `E2E_SCREENSHOTS` to a directory to keep screenshots. The study tests play Romans 1 on three clients for two minutes and print the drift report.
 
+For offline downloads, `node --test tests/e2e/download-integrity.test.ts` runs the production client against synthetic content without database, mail or upstream services. See [offline acceptance](docs/offline-acceptance.md) for its scope and the separate iPhone/Android checklist; physical-device checks remain not performed.
+
 ## Container
 
 ```bash
