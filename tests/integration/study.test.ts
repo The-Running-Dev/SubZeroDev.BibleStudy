@@ -654,6 +654,22 @@ describe('S9 wrap-up and the stopping point', () => {
     await closeClient(client);
   });
 
+  test('S9.1 a seek forward while paused is not reached; narration counts only while it plays', async () => {
+    const { owner, groupId } = await ownerAndMember();
+    const { sessionId } = await start(owner.cookie, groupId);
+    const client = await connect(owner.cookie);
+    const { state } = await client.join(sessionId);
+    const sought = await client.command(sessionId, state.revision, { kind: 'seek', positionSeconds: 22 * verseSeconds + 0.5 });
+    assert.equal(sought.outcome, 'applied', sought.reason);
+    h.clock.advance(60_000);
+    assert.deepEqual((await wrapUp(owner.cookie, groupId, sessionId)).suggested, rom1(1), 'paused at verse 23 without reading up to it');
+    const played = await client.command(sessionId, sought.state.revision, { kind: 'play' });
+    h.clock.advance(2 * verseSeconds * 1000);
+    await client.command(sessionId, played.state.revision, { kind: 'pause' });
+    assert.deepEqual((await wrapUp(owner.cookie, groupId, sessionId)).suggested, rom1(25));
+    await closeClient(client);
+  });
+
   test('S9.2 of two confirmations based on the same stopping point, the second is stale_progress carrying the first', async () => {
     const { owner, member, groupId } = await ownerAndMember();
     const base = (await confirm(owner.cookie, groupId, null, 3)).json().id as string;
@@ -706,19 +722,27 @@ describe('S9 wrap-up and the stopping point', () => {
     const carried = questions[1];
     const reply = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${carried.id}/replies`, { clientOpId: randomUUID(), body: 'Next time.' });
     assert.equal(reply.statusCode, 200, reply.body);
-    assert.deepEqual((await wrapUp(member.cookie, groupId, sessionId)).openQuestions.map((q) => q.body), ['Closed?', 'Carried?', 'Resolved?', 'Moot?']);
+    const shown = (await wrapUp(member.cookie, groupId, sessionId)).openQuestions;
+    assert.deepEqual(shown.map((q) => q.body), ['Closed?', 'Carried?', 'Resolved?', 'Moot?']);
 
     const statuses = ['closed', 'carried', 'resolved', 'no_longer_relevant'] as const;
     for (const [i, status] of statuses.entries()) {
-      const response = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${questions[i].id}/disposition`, { status, sessionId });
+      const response = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${shown[i].id}/disposition`, { status, version: shown[i].version, sessionId });
       assert.equal(response.statusCode, 200, response.body);
       const settled: QuestionView = response.json();
       assert.equal(settled.status, status);
-      assert.ok(settled.version > questions[i].version);
-      await watcher.next((m) => m.t === 'question' && m.question.id === questions[i].id && m.question.status === status);
+      assert.ok(settled.version > shown[i].version);
+      await watcher.next((m) => m.t === 'question' && m.question.id === shown[i].id && m.question.status === status);
     }
-    const bad = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${carried.id}/disposition`, { status: 'open' });
+    // A decision on a version someone has since changed is refused and shows theirs.
+    const stale = await call('POST', owner.cookie, `/api/groups/${groupId}/questions/${carried.id}/disposition`, { status: 'closed', version: shown[1].version, sessionId });
+    assert.equal(stale.statusCode, 409, stale.body);
+    assert.equal(stale.json().error, 'stale_revision');
+    assert.equal(stale.json().details.current.status, 'carried');
+    const bad = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${carried.id}/disposition`, { status: 'open', version: shown[1].version + 1 });
     assert.equal(bad.statusCode, 400);
+    const unversioned = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${carried.id}/disposition`, { status: 'closed' });
+    assert.equal(unversioned.statusCode, 400);
     const decisions = await h.db.query<{ session_id: string }>('SELECT session_id FROM question_dispositions');
     assert.equal(decisions.rowCount, 4);
     assert.ok(decisions.rows.every((r) => r.session_id === sessionId));

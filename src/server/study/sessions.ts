@@ -133,7 +133,8 @@ async function effectiveDraft(q: Queryable, mediaDir: string, row: SessionRow, n
       Object.assign(draft, { status: 'paused', positionSeconds: position, anchorServerTimeMs: nowMs, pausedReason: 'range_end' });
     }
   }
-  draft.reachedVerse = furthest(draft.reachedVerse, verseNow(draft, nowMs));
+  // Narration counts as reached only while it plays: a seek lands somewhere, it does not read up to it.
+  if (row.play_status === 'playing' || draft.mode === 'manual') draft.reachedVerse = furthest(draft.reachedVerse, verseNow(draft, nowMs));
   return draft;
 }
 
@@ -517,9 +518,11 @@ export async function applyCommand(
     }
     try {
       if (await applyTo(tx, mediaDir, draft, command, nowMs)) waiting = draft.passage;
-      // Moving to another chapter starts its furthest verse over; anything else can only take it further.
+      // Moving to another chapter starts its furthest verse over. Narration reached up to now is already counted; after
+      // the command only a marked verse is, since a seek or a new passage has not been read yet.
       const moved = draft.passage.bookId !== row.book_id || draft.passage.chapter !== row.chapter;
-      draft.reachedVerse = moved ? verseNow(draft, nowMs) : furthest(draft.reachedVerse, verseNow(draft, nowMs));
+      const marked = draft.mode === 'manual' ? verseNow(draft, nowMs) : null;
+      draft.reachedVerse = moved ? marked : furthest(draft.reachedVerse, marked);
     } catch (error) {
       if (!(error instanceof Rejection)) throw error;
       if (command.kind === 'play' && row.mode === 'narration' && !draft.recording) waiting = draft.passage;

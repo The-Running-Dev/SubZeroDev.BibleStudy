@@ -51,14 +51,16 @@ export function ConfirmStop(props: {
     setError(null);
     setSaved(null);
     try {
-      await api.confirmProgress(props.groupId, {
+      const { id } = await api.confirmProgress(props.groupId, {
         basedOnId: basedOn?.id ?? null,
         ref,
         ...(props.sessionId ? { sessionId: props.sessionId } : {}),
       });
-      setBasedOn((await api.progress(props.groupId)).progress);
       setSaved(`Saved: the next study starts at ${formatStop(ref)}.`);
       props.onConfirmed?.();
+      // The saved row is what a further confirmation builds on, even when the refresh that names who saved it fails.
+      const mine = { id, ref, confirmedBy: 'you', confirmedAt: new Date().toISOString() };
+      setBasedOn(await api.progress(props.groupId).then(({ progress }) => (progress?.id === id ? progress : mine), () => mine));
     } catch (e) {
       const current =
         e instanceof ApiFailure && e.body.error === 'stale_progress'
@@ -116,22 +118,19 @@ export function WrapUp(props: { groupId: string; sessionId: string; onClose: () 
     };
   }, [props.groupId, props.sessionId]);
 
+  const replace = (updated: QuestionView) => setView((v) => v && { ...v, openQuestions: v.openQuestions.map((q) => (q.id === updated.id ? updated : q)) });
+
+  // Based on the version shown, so a decision someone else made meanwhile is shown rather than overwritten.
   async function settle(question: QuestionView, status: Disposition) {
     setError(null);
     try {
-      const updated = await api.setDisposition(props.groupId, question.id, {
-        status,
-        sessionId: props.sessionId,
-      });
-      setView(
-        (v) =>
-          v && {
-            ...v,
-            openQuestions: v.openQuestions.map((q) => (q.id === updated.id ? updated : q)),
-          }
-      );
+      replace(await api.setDisposition(props.groupId, question.id, { status, version: question.version, sessionId: props.sessionId }));
     } catch (e) {
-      setError(messageFor(e));
+      const current = e instanceof ApiFailure && e.body.error === 'stale_revision' ? (e.body.details?.current as QuestionView | undefined) : undefined;
+      if (current) {
+        replace(current);
+        setError(`Someone changed "${current.body ?? 'a removed question'}" first; it is now ${statusLabels[current.status]}. Decide again to replace it.`);
+      } else setError(messageFor(e));
     }
   }
 

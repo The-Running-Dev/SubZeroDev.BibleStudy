@@ -217,13 +217,15 @@ export async function setDisposition(deps: QuestionDeps, userId: string, groupId
   const r = (request ?? {}) as Record<string, unknown>;
   if (!(dispositions as readonly unknown[]).includes(r.status)) throw invalid('Status must be closed, carried, resolved or no_longer_relevant.');
   const status = r.status as Disposition;
+  if (!Number.isInteger(r.version)) throw invalid('A decision needs the version of the question it was made on.');
   if (r.sessionId !== undefined && r.sessionId !== null && !isUuid(r.sessionId)) throw invalid('Unknown session.');
-  const sessionId = (r.sessionId as string | null | undefined) ?? null;
+  const sessionId = (r.sessionId as string | null | undefined)?.toLowerCase() ?? null;
   if (!isUuid(questionId)) throw notFound();
   const group = groupId as string;
   return withTransaction(deps.db, async (tx) => {
     const question = await loadQuestion(tx, group, questionId, ' FOR UPDATE OF q');
     if (!question) throw notFound();
+    if (question.version !== r.version) throw staleRevision((await questionView(tx, group, questionId))!);
     if (sessionId) {
       const owned = await tx.query('SELECT 1 FROM study_sessions WHERE id = $1 AND group_id = $2', [sessionId, group]);
       if (!owned.rowCount) throw invalid('Unknown session.');

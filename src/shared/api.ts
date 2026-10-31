@@ -264,6 +264,8 @@ export const dispositions: readonly Disposition[] = ['closed', 'carried', 'resol
 
 export interface DispositionRequest {
   status: Disposition;
+  // The question's version the member decided on; stale_revision (409) with details.current when it changed since.
+  version: number;
   sessionId?: Uuid;
 }
 

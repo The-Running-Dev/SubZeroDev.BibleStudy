@@ -275,8 +275,9 @@ function postReply(groupId: Uuid, questionId: Uuid, body: { clientOpId: Uuid; bo
 // PATCH / DELETE on questions/:id and replies/:id (author only)
 function editPost(groupId: Uuid, target: { questionId: Uuid } | { replyId: Uuid }, body: { expectedRevision: number; body: string }): Promise<QuestionView | ReplyView>;
 function deletePost(groupId: Uuid, target: { questionId: Uuid } | { replyId: Uuid }): Promise<{ outcome: 'deleted' | 'body_removed' }>;
-// POST .../questions/:id/disposition (any member, during or after a session)
-function setDisposition(groupId: Uuid, questionId: Uuid, body: { status: 'closed' | 'carried' | 'resolved' | 'no_longer_relevant'; sessionId?: Uuid }): Promise<QuestionView>;
+// POST .../questions/:id/disposition (any member, during or after a session). `version` is the question's version the member decided on;
+// stale_revision (409) with details.current when it has changed since.
+function setDisposition(groupId: Uuid, questionId: Uuid, body: { status: 'closed' | 'carried' | 'resolved' | 'no_longer_relevant'; version: number; sessionId?: Uuid }): Promise<QuestionView>;
 ```
 
 ### personal
@@ -427,11 +428,11 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `no_active_session` (404): ended or never started. Retry: no.
 
 **progress**
-- `stale_progress` (409): someone confirmed first. Retry: no. Show their choice.
+- `stale_progress` (409): someone confirmed first. Retry: no. Show their choice; the member may confirm again on it.
 
 **questions**
 - `not_author` (403): editing or deleting someone else's post. Retry: no.
-- `stale_revision` (409): edited since loaded. Retry: no.
+- `stale_revision` (409): edited or decided since loaded. Retry: no. Show `details.current`; the member may decide again on it.
 - `empty_body` (400): blank body. Retry: no.
 
 **personal**

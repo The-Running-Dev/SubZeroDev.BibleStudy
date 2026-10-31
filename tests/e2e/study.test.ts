@@ -259,7 +259,11 @@ describe('wrapping up', () => {
     await mark.page.getByRole('status').filter({ hasText: 'Saved: the next study starts at Romans 1:7.' }).waitFor();
     if (process.env.E2E_SCREENSHOTS) await mark.page.screenshot({ path: `${process.env.E2E_SCREENSHOTS}/study-wrap-up.png`, fullPage: true });
 
+    // Ending the study keeps an open wrap-up; it leaves when its member is done with it.
     await olive.page.getByRole('button', { name: 'End study' }).click();
+    await olive.page.getByRole('status').filter({ hasText: 'This study has ended.' }).waitFor();
+    assert.ok(await olive.page.getByLabel('Stopping point').isVisible(), 'the wrap-up stays open after the study ends');
+    await olive.page.getByRole('button', { name: 'Done' }).click();
     const resume = olive.page.getByRole('button', { name: 'Resume study at Romans 1:7' });
     await resume.waitFor();
     await resume.click();

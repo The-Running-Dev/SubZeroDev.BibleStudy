@@ -40,7 +40,7 @@ export async function latestProgress(q: Queryable, groupId: string): Promise<Gro
   const result = await q.query<ProgressRow>(
     `SELECT p.id, p.book_id, p.chapter, p.verse, u.display_name AS confirmed_by_name, p.confirmed_at
        FROM group_progress p JOIN users u ON u.id = p.confirmed_by
-      WHERE p.group_id = $1 AND NOT EXISTS (SELECT 1 FROM group_progress n WHERE n.based_on_id = p.id)`,
+      WHERE p.group_id = $1 AND NOT EXISTS (SELECT 1 FROM group_progress n WHERE n.group_id = p.group_id AND n.based_on_id = p.id)`,
     [groupId],
   );
   return result.rows[0] ? toView(result.rows[0]) : null;
@@ -78,7 +78,7 @@ export async function confirmStoppingPoint(deps: ProgressDeps, userId: string, g
   const basedOnId = body.basedOnId ?? null;
   if (basedOnId !== null && !isUuid(basedOnId)) throw invalid('basedOnId must be the id of the stopping point last seen, or null.');
   if (body.sessionId !== undefined && body.sessionId !== null && !isUuid(body.sessionId)) throw invalid('Unknown session.');
-  const sessionId = (body.sessionId as string | null | undefined) ?? null;
+  const sessionId = (body.sessionId as string | null | undefined)?.toLowerCase() ?? null;
   return withTransaction(deps.db, async (tx) => {
     await tx.query('SELECT 1 FROM groups WHERE id = $1 FOR UPDATE', [id]);
     const ref = await stoppingPoint(tx, body.ref);
@@ -87,7 +87,7 @@ export async function confirmStoppingPoint(deps: ProgressDeps, userId: string, g
       if (!owned.rowCount) throw invalid('Unknown session.');
     }
     const latest = await latestProgress(tx, id);
-    if ((latest?.id ?? null) !== basedOnId) {
+    if ((latest?.id ?? null) !== ((basedOnId as string | null)?.toLowerCase() ?? null)) {
       throw new AppError('stale_progress', 409, 'Someone confirmed a stopping point first.', { details: { current: latest } });
     }
     const now = deps.clock.now();

@@ -25,6 +25,9 @@ type Entry = { kind: 'checking' } | { kind: 'idle'; active: boolean; progress: G
 // The group's shared study: start or join, then everyone follows one PlaybackState.
 export function Study(props: { groupId: string; userId: string }) {
   const [entry, setEntry] = useState<Entry>({ kind: 'checking' });
+  // The study that just ended here, which can still be wrapped up (S9.4).
+  const [lastSession, setLastSession] = useState<string | null>(null);
+  const [wrappingLast, setWrappingLast] = useState(false);
 
   const check = useCallback(() => {
     const progress = api
@@ -40,6 +43,13 @@ export function Study(props: { groupId: string; userId: string }) {
       });
   }, [props.groupId]);
   useEffect(check, [check]);
+  const ended = useCallback(
+    (sessionId: string) => {
+      setLastSession(sessionId);
+      check();
+    },
+    [check],
+  );
 
   async function enter() {
     try {
@@ -66,10 +76,27 @@ export function Study(props: { groupId: string; userId: string }) {
             <ConfirmStop groupId={props.groupId} initial="" label="Confirm starting point" onConfirmed={check} />
           </details>
         )}
+        {!entry.active &&
+          lastSession &&
+          (wrappingLast ? (
+            <WrapUp
+              groupId={props.groupId}
+              sessionId={lastSession}
+              onClose={() => {
+                setWrappingLast(false);
+                setLastSession(null);
+                check();
+              }}
+            />
+          ) : (
+            <button type="button" className="secondary" onClick={() => setWrappingLast(true)}>
+              Wrap up the last study
+            </button>
+          ))}
       </section>
     );
   }
-  return <LiveStudy key={entry.sessionId} groupId={props.groupId} userId={props.userId} sessionId={entry.sessionId} initial={entry.state} onEnded={check} />;
+  return <LiveStudy key={entry.sessionId} groupId={props.groupId} userId={props.userId} sessionId={entry.sessionId} initial={entry.state} onEnded={ended} />;
 }
 
 function statusLine(state: PlaybackState): string {
@@ -102,7 +129,7 @@ function connectionNote(status: LiveStatus): string | null {
   return 'Too many open tabs. Close another tab and reload.';
 }
 
-function LiveStudy(props: { groupId: string; userId: string; sessionId: string; initial: PlaybackState; onEnded: () => void }) {
+function LiveStudy(props: { groupId: string; userId: string; sessionId: string; initial: PlaybackState; onEnded: (sessionId: string) => void }) {
   const { groupId, sessionId, onEnded } = props;
   const [state, setState] = useState<PlaybackState>(props.initial);
   const [presence, setPresence] = useState<Presence[]>([]);
@@ -114,6 +141,8 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
   const [questions, setQuestions] = useState<QuestionView[]>([]);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
   const [wrapping, setWrapping] = useState(false);
+  // The server no longer knows the session: it ended while this client was away.
+  const [gone, setGone] = useState(false);
   // Re-renders the position label and slider while playing.
   const [, setNow] = useState(0);
   const live = useRef<Live | null>(null);
@@ -153,7 +182,7 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
           setPresence(message.presence);
           return;
         case 'error':
-          if (message.error === 'no_active_session') onEnded();
+          if (message.error === 'no_active_session') setGone(true);
           else if (message.error !== 'not_member' && message.error !== 'unauthenticated') setNotice(`Something went wrong (${message.error}).`);
           return;
         case 'pong':
@@ -167,7 +196,7 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
       channel.close();
       live.current = null;
     };
-  }, [sessionId, accept, onEnded]);
+  }, [sessionId, accept]);
 
   // Follows the shared state: plays, pauses, corrects drift, and tracks the verse being read.
   useEffect(() => {
@@ -212,9 +241,10 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
     return () => clearInterval(timer);
   }, [waiting, sessionId]);
 
+  // An open wrap-up stays open when the study ends, so a member finishing it loses nothing; it leaves when they close it.
   useEffect(() => {
-    if (state.status === 'ended') onEnded();
-  }, [state.status, onEnded]);
+    if ((state.status === 'ended' || gone) && !wrapping) onEnded(sessionId);
+  }, [state.status, gone, wrapping, sessionId, onEnded]);
 
   // The questions the study keeps in view (S9.4), again whenever the chapter changes or a post here changed one.
   const { bookId, chapter } = state.passage;
@@ -356,9 +386,15 @@ function LiveStudy(props: { groupId: string; userId: string; sessionId: string; 
               Wrap up
             </button>
           )}
-          <button type="button" className="secondary" onClick={() => send({ kind: 'end_session' })}>
-            End study
-          </button>
+          {state.status === 'ended' ? (
+            <p className="player-note" role="status">
+              This study has ended. Choose Done when the wrap-up is finished.
+            </p>
+          ) : (
+            <button type="button" className="secondary" onClick={() => send({ kind: 'end_session' })}>
+              End study
+            </button>
+          )}
         </div>
       </StudyPassage>
     </section>
