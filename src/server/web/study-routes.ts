@@ -1,15 +1,25 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
-import type { ClientMessage, DriftReport, ServerMessage, StudySessionResponse } from '../../shared/api.ts';
+import type { ClientMessage, DriftReport, ServerMessage, StudySessionResponse, WrapUpView } from '../../shared/api.ts';
 import { closeTooMany } from '../../shared/api.ts';
 import { sessionIsValid } from '../identity/sessions.ts';
 import { AppError } from '../platform/errors.ts';
 import { isUuid } from '../platform/ids.ts';
 import { log } from '../platform/log.ts';
-import { questionsFor } from '../questions/questions.ts';
+import { sessionQuestions } from '../questions/questions.ts';
 import type { RealtimeHub } from '../study/realtime.ts';
 import type { StudyDeps } from '../study/sessions.ts';
-import { activeSession, applyCommand, driftReport, parseCommand, pauseForEmptyRoom, recordDrift, sessionForMember, startOrJoinSession } from '../study/sessions.ts';
+import {
+  activeSession,
+  applyCommand,
+  driftReport,
+  parseCommand,
+  pauseForEmptyRoom,
+  recordDrift,
+  sessionForMember,
+  startOrJoinSession,
+  wrapUp,
+} from '../study/sessions.ts';
 import type { AppDeps } from './app.ts';
 import { requireAuth } from './auth.ts';
 
@@ -94,6 +104,11 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
   app.get('/api/groups/:groupId/session/:sessionId/drift-report', async (request): Promise<DriftReport> => {
     const { groupId, sessionId } = request.params as Params;
     return driftReport(study, requireAuth(request).userId, groupId, sessionId);
+  });
+
+  app.get('/api/groups/:groupId/session/:sessionId/wrap-up', async (request): Promise<WrapUpView> => {
+    const { groupId, sessionId } = request.params as Params;
+    return wrapUp(study, requireAuth(request).userId, groupId, sessionId);
   });
 
   // The realtime channel. The onRequest hook authenticates the upgrade like any API call.
@@ -188,9 +203,9 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
               // Join the room before reading the snapshot, so a change committed in between reaches this connection
               // as a broadcast instead of being lost.
               hub.join(connection, checked.sessionId);
-              const { groupId, state } = await sessionForMember(study, auth.userId, checked.sessionId);
+              const { groupId, state, startedAt } = await sessionForMember(study, auth.userId, checked.sessionId);
               // The open and carried questions on the session's chapter; each appears as the narration reaches its verse.
-              const questions = await questionsFor(deps.db, groupId, { bookId: state.passage.bookId, chapter: state.passage.chapter, status: ['open', 'carried'] });
+              const questions = await sessionQuestions(deps.db, groupId, state.passage, startedAt);
               return reply({ t: 'snapshot', state, presence: hub.presence(state.sessionId), questions });
             }
             case 'command': {

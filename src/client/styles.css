@@ -331,7 +331,8 @@ button:disabled {
   justify-content: flex-end;
 }
 
-.questions {
+.questions,
+.wrap-up {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -339,7 +340,8 @@ button:disabled {
   border-top: 1px solid #9ca3af;
 }
 
-.questions h2 {
+.questions h2,
+.wrap-up h2 {
   margin: 0;
   font-size: 1.1rem;
 }
@@ -410,4 +412,18 @@ button:disabled {
   display: flex;
   gap: 1rem;
   align-items: center;
+}
+
+.wrap-up h3 {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+}
+
+.question-actions button[aria-pressed='true'] {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.starting-point summary {
+  cursor: pointer;
 }

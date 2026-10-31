@@ -8,6 +8,18 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S9: the stopping point is a confirmed chain, and a study resumes at its verse
+- **Context:** S9 needs a stopping point that only an explicit confirmation moves, two confirmations at once that do not silently overwrite each other, and carried questions that come back.
+- **Chosen:**
+  - Each confirmation is a new `group_progress` row naming the one it replaced (`based_on_id`, unique per group). The current stopping point is the chain's tip; a confirmation based on anything else gets `stale_progress` with the current one, which the client shows and lets the member confirm again over. The group row is locked while confirming.
+  - A session records the furthest verse reached on its chapter (`reached_verse`), from the narrated verse with verified timing or the marked verse when reading together. Seeking back does not lower it; moving to another chapter starts it over. Wrap-up suggests it, and works after the session ended.
+  - A new session opens the stopping point's chapter: narration with verified timing starts at the verse's start, reading together marks the verse. Without verified timing narration can only start at the beginning of the chapter, and the member seeks to the verse.
+  - The study shows its chapter's open questions, every carried one, and any posted since it started, so a question asked on one chapter stays in view after the passage moves on. A question on another chapter is shown at once rather than waiting for a verse.
+  - Each disposition is kept in `question_dispositions` with the session, and raises the question's version so every client takes it.
+  - S9.3's solo position does not exist until S12; group actions write only the session and the confirmed chain.
+- **Rejected:** writing the stopping point automatically when a session ends. S9.5 requires an explicit confirmation.
+- **Rejected:** last-write-wins confirmation. S9.2 requires the second member to see the first's choice.
+
 ### 2026-10-31 — S8: questions are revealed by the verse being read, and a reply does not make the asker's edit stale
 - **Context:** S8.3 needs a verse question to appear once the narration reaches it, without pausing and without appearing twice, and S8.4 needs an edit to fail on a post that changed since it was opened.
 - **Chosen:**

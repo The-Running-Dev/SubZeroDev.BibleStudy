@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { formatStop, parseStop, staleNote } from '../../src/client/progress.ts';
 import { applyQuestion, mergeQuestions, pacedBy, parseVerses, reveal } from '../../src/client/questions.ts';
 import type { QuestionView } from '../../src/shared/api.ts';
 
@@ -45,6 +46,11 @@ describe('reveal (S8.3)', () => {
   test('seeking past several verses reveals all of them', () => {
     assert.deepEqual([...reveal(questions, 12, new Set())].sort(), ['chapter', 'v4', 'v9']);
   });
+
+  test('a question on another chapter than the study’s shows from the start (S9.4)', () => {
+    const carried = question('carried', 7, { anchor: { translationId: 'BSB', bookId: 'ROM', chapter: 1, startVerse: 7, endVerse: 7 }, status: 'carried' });
+    assert.deepEqual([...reveal([...questions, carried], null, new Set(), romans2)].sort(), ['carried', 'chapter']);
+  });
 });
 
 describe('applyQuestion', () => {
@@ -83,6 +89,20 @@ describe('applyQuestion', () => {
     assert.deepEqual(applyQuestion([], question('other', 4), { bookId: 'ROM', chapter: 3 }), []);
   });
 
+  test('a carried question, or one already shown, stays when it is on another chapter (S9.4)', () => {
+    const romans3 = { bookId: 'ROM', chapter: 3 };
+    assert.deepEqual(applyQuestion([], question('carried', 4, { status: 'carried' }), romans3).map((q) => q.id), ['carried']);
+    const shown = [question('earlier', 4)];
+    assert.equal(applyQuestion(shown, question('earlier', 4, { body: 'Edited', version: 2 }), romans3)[0].body, 'Edited');
+  });
+
+  test('questions sort by book and chapter before verse', () => {
+    const at = (id: string, chapter: number, verse: number) => question(id, verse, { anchor: { translationId: 'BSB', bookId: 'ROM', chapter, startVerse: verse, endVerse: verse } });
+    let list = applyQuestion([], at('ch3v1', 3, 1), { bookId: 'ROM', chapter: 3 });
+    list = applyQuestion(list, at('ch2v9', 2, 9), romans2);
+    assert.deepEqual(list.map((q) => q.id), ['ch2v9', 'ch3v1']);
+  });
+
   test('a removed question that still has replies stays, as a placeholder', () => {
     const reply = { id: 'r1', author: { userId: 'u2', displayName: 'Mark' }, body: 'Here', removed: false, editedAt: null, createdAt: '2026-11-01T12:01:00.000Z', revision: 1 };
     const list = applyQuestion([question('v4', 4)], question('v4', 4, { removed: true, body: null, replies: [reply], revision: 2 }), romans2);
@@ -112,5 +132,22 @@ describe('parseVerses', () => {
 
   test('anything else is null', () => {
     for (const text of ['0', '6-4', 'four', '4,6', '-3']) assert.equal(parseVerses(text), null, text);
+  });
+});
+
+describe('stopping points (S9)', () => {
+  test('a verse reference, or the last verse of a range', () => {
+    assert.deepEqual(parseStop('Romans 2:11'), { bookId: 'ROM', chapter: 2, verse: 11 });
+    assert.deepEqual(parseStop('rom 2:11-14'), { bookId: 'ROM', chapter: 2, verse: 14 });
+  });
+
+  test('a chapter or an unknown reference is not a stopping point', () => {
+    for (const text of ['Romans 2', 'Nowhere 1:1', '']) assert.equal(parseStop(text), null, text);
+  });
+
+  test('formats as a verse, and names who confirmed first', () => {
+    const ref = { bookId: 'ROM', chapter: 2, verse: 11 };
+    assert.equal(formatStop(ref), 'Romans 2:11');
+    assert.equal(staleNote({ id: 'p1', ref, confirmedBy: 'Mark', confirmedAt: '2026-11-01T12:00:00.000Z' }), 'Mark confirmed Romans 2:11 first. Confirm again to replace it.');
   });
 });

@@ -309,6 +309,7 @@ describe('in the study', () => {
     const { owner, member, groupId } = await ownerAndMember();
     const onChapter = await ask(owner.cookie, groupId, romans(1, 3), 'On the session’s chapter');
     await ask(owner.cookie, groupId, romans(2, 4), 'On another chapter');
+    h.clock.advance(1000); // asked before the study, which shows only its own chapter's
     const { sessionId } = (await call('POST', owner.cookie, `/api/groups/${groupId}/session`)).json();
 
     const socket = new WebSocket(wsUrl, { headers: { cookie: `bs_session=${member.cookie}` } });

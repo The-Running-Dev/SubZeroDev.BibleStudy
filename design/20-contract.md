@@ -250,10 +250,12 @@ function driftReport(groupId: Uuid, sessionId: Uuid): Promise<{ samples: number;
 
 ```ts
 // GET /api/groups/:groupId/progress
-function currentStoppingPoint(groupId: Uuid): Promise<{ id: Uuid; ref: { bookId: BookId; chapter: number; verse: number }; confirmedBy: string; confirmedAt: IsoInstant } | null>;
+function currentStoppingPoint(groupId: Uuid): Promise<{ progress: { id: Uuid; ref: { bookId: BookId; chapter: number; verse: number }; confirmedBy: string; confirmedAt: IsoInstant } | null }>;
 // POST /api/groups/:groupId/progress
+// 201; stale_progress (409) with details.current when basedOnId is not the current stopping point's id.
 function confirmStoppingPoint(groupId: Uuid, body: { basedOnId: Uuid | null; ref: { bookId: BookId; chapter: number; verse: number }; sessionId?: Uuid }): Promise<{ id: Uuid }>;
-// GET /api/groups/:groupId/session/:sessionId/wrap-up
+// GET /api/groups/:groupId/session/:sessionId/wrap-up (also after the session ended). openQuestions: the open and carried
+// questions on the session's chapter, every carried one, and any posted since the session started.
 function wrapUpSuggestion(groupId: Uuid, sessionId: Uuid): Promise<{ suggested: { bookId: BookId; chapter: number; verse: number }; openQuestions: QuestionView[] }>;
 ```
 

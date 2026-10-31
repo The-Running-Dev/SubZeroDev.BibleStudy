@@ -11,7 +11,10 @@ import { createAoLabSource } from '../../src/server/content/aolab.ts';
 import { runImport } from '../../src/server/content/import.ts';
 import { importAudio } from '../../src/server/content/narration.ts';
 import { pauseForEmptyRoom } from '../../src/server/study/sessions.ts';
-import type { Command, PlaybackState, ServerMessage } from '../../src/shared/api.ts';
+import type { Command,
+  GroupProgressView, PlaybackState,
+  QuestionView, ServerMessage,
+  WrapUpView } from '../../src/shared/api.ts';
 import type { Harness } from '../support/harness.ts';
 import { clearMailbox, databaseUrl, ownerEmail, signIn, smtpUrl, startHarness, truncateAll } from '../support/harness.ts';
 import { frameSeconds, synthMp3 } from '../support/mp3.ts';
@@ -166,7 +169,7 @@ async function closeClient(client: Client): Promise<void> {
 }
 
 async function sessionRow(sessionId: string) {
-  const result = await h.db.query<{ status: string; revision: number; play_status: string; paused_reason: string | null; position_seconds: number; changed_at: Date }>(
+  const result = await h.db.query<{ status: string; revision: number; play_status: string; paused_reason: string | null; position_seconds: number; changed_at: Date; }>(
     'SELECT status, revision, play_status, paused_reason, position_seconds, changed_at FROM study_sessions WHERE id = $1',
     [sessionId],
   );
@@ -586,5 +589,171 @@ describe('S5.8 restart', () => {
       await exited(first.child);
       if (second) await exited(second.child);
     }
+  });
+});
+
+describe('S9 wrap-up and the stopping point', () => {
+  const call = (method: 'GET' | 'POST', cookie: string, url: string, payload?: object) => h.app.inject({ method, url, cookies: { bs_session: cookie }, payload });
+  const rom1 = (verse: number) => ({ bookId: 'ROM', chapter: 1, verse });
+
+  async function progress(cookie: string, groupId: string): Promise<GroupProgressView | null> {
+    const response = await call('GET', cookie, `/api/groups/${groupId}/progress`);
+    assert.equal(response.statusCode, 200, response.body);
+    return response.json().progress;
+  }
+
+  async function confirm(cookie: string, groupId: string, basedOnId: string | null, verse: number, sessionId?: string) {
+    return call('POST', cookie, `/api/groups/${groupId}/progress`, { basedOnId, ref: rom1(verse), ...(sessionId ? { sessionId } : {}) });
+  }
+
+  async function wrapUp(cookie: string, groupId: string, sessionId: string): Promise<WrapUpView> {
+    const response = await call('GET', cookie, `/api/groups/${groupId}/session/${sessionId}/wrap-up`);
+    assert.equal(response.statusCode, 200, response.body);
+    return response.json();
+  }
+
+  async function ask(cookie: string, groupId: string, startVerse: number, body: string): Promise<QuestionView> {
+    const anchor = { translationId: 'BSB', bookId: 'ROM', chapter: 1, startVerse, endVerse: startVerse };
+    const response = await call('POST', cookie, `/api/groups/${groupId}/questions`, { clientOpId: randomUUID(), anchor, body });
+    assert.equal(response.statusCode, 200, response.body);
+    return response.json();
+  }
+
+  async function end(client: Client, sessionId: string) {
+    const { state } = await client.join(sessionId);
+    assert.equal((await client.command(sessionId, state.revision, { kind: 'end_session' })).outcome, 'applied');
+  }
+
+  test('S9.1 the wrap-up suggests the furthest verse reached; a member adjusts and confirms it, and the next study resumes there', async () => {
+    const { owner, member, groupId } = await ownerAndMember();
+    const { sessionId } = await start(owner.cookie, groupId);
+    const client = await connect(owner.cookie);
+    const { state } = await client.join(sessionId);
+    const played = await client.command(sessionId, state.revision, { kind: 'play' });
+    assert.equal(played.outcome, 'applied', played.reason);
+    h.clock.advance(15 * verseSeconds * 1000 + 500); // into verse 16
+    const paused = await client.command(sessionId, played.state.revision, { kind: 'pause' });
+    // Seeking back does not take the suggestion back.
+    await client.command(sessionId, paused.state.revision, { kind: 'seek', positionSeconds: 2 });
+    assert.deepEqual((await wrapUp(member.cookie, groupId, sessionId)).suggested, rom1(16));
+
+    assert.equal(await progress(member.cookie, groupId), null, 'nothing is studied until someone confirms');
+    const confirmed = await confirm(member.cookie, groupId, null, 11, sessionId);
+    assert.equal(confirmed.statusCode, 201, confirmed.body);
+    await end(client, sessionId);
+    assert.deepEqual((await wrapUp(owner.cookie, groupId, sessionId)).suggested, rom1(16), 'an ended session can still be wrapped up');
+    const current = await progress(owner.cookie, groupId);
+    assert.equal(current?.id, confirmed.json().id);
+    assert.deepEqual(current?.ref, rom1(11));
+    assert.equal(current?.confirmedBy, 'Mark');
+
+    const next = await start(owner.cookie, groupId);
+    assert.deepEqual(next.state.passage, { bookId: 'ROM', chapter: 1, startVerse: null, endVerse: null });
+    assert.ok(Math.abs(next.state.positionSeconds - 10 * verseSeconds) < 1e-9, 'narration starts at verse 11');
+    assert.deepEqual((await wrapUp(owner.cookie, groupId, next.sessionId)).suggested, rom1(11));
+    await closeClient(client);
+  });
+
+  test('S9.2 of two confirmations based on the same stopping point, the second is stale_progress carrying the first', async () => {
+    const { owner, member, groupId } = await ownerAndMember();
+    const base = (await confirm(owner.cookie, groupId, null, 3)).json().id as string;
+    const [a, b] = await Promise.all([confirm(owner.cookie, groupId, base, 7), confirm(member.cookie, groupId, base, 9)]);
+    const won = a.statusCode === 201 ? a : b;
+    const lost = a.statusCode === 201 ? b : a;
+    assert.equal(won.statusCode, 201, won.body);
+    assert.equal(lost.statusCode, 409, lost.body);
+    assert.equal(lost.json().error, 'stale_progress');
+    const current = await progress(owner.cookie, groupId);
+    assert.equal(current?.id, won.json().id);
+    assert.deepEqual(lost.json().details.current, current);
+    // Confirming again on what was shown succeeds.
+    assert.equal((await confirm(member.cookie, groupId, current!.id, 9)).statusCode, 201);
+  });
+
+  test('S9.3 seeking, changing the passage and posting questions leave the stopping point as it was', async () => {
+    const { owner, member, groupId } = await ownerAndMember();
+    await confirm(owner.cookie, groupId, null, 5);
+    const before = await progress(owner.cookie, groupId);
+    const { sessionId } = await start(owner.cookie, groupId);
+    const client = await connect(member.cookie);
+    let revision = (await client.join(sessionId)).state.revision;
+    const commands: Command[] = [{ kind: 'seek', positionSeconds: 40 }, { kind: 'set_passage', passage: { bookId: 'ROM', chapter: 1, startVerse: 20, endVerse: 25 } }, { kind: 'play' }];
+    for (const command of commands) {
+      const result = await client.command(sessionId, revision, command);
+      assert.equal(result.outcome, 'applied', result.reason);
+      revision = result.state.revision;
+    }
+    h.clock.advance(5_000);
+    await ask(member.cookie, groupId, 22, 'Exchanged for what?');
+    await end(client, sessionId);
+    assert.deepEqual(await progress(owner.cookie, groupId), before);
+    const rows = await h.db.query<{ n: number }>('SELECT count(*)::int AS n FROM group_progress');
+    assert.equal(rows.rows[0].n, 1);
+    await closeClient(client);
+  });
+
+  test('S9.4 each open question can be settled; a carried one comes back in the next study with its anchor and replies', async () => {
+    const { owner, member, groupId } = await ownerAndMember();
+    const { sessionId } = await start(owner.cookie, groupId);
+    const watcher = await connect(owner.cookie);
+    await watcher.join(sessionId);
+    const questions = [
+      await ask(owner.cookie, groupId, 1, 'Closed?'),
+      await ask(owner.cookie, groupId, 2, 'Carried?'),
+      await ask(member.cookie, groupId, 3, 'Resolved?'),
+      await ask(member.cookie, groupId, 4, 'Moot?'),
+    ];
+    const carried = questions[1];
+    const reply = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${carried.id}/replies`, { clientOpId: randomUUID(), body: 'Next time.' });
+    assert.equal(reply.statusCode, 200, reply.body);
+    assert.deepEqual((await wrapUp(member.cookie, groupId, sessionId)).openQuestions.map((q) => q.body), ['Closed?', 'Carried?', 'Resolved?', 'Moot?']);
+
+    const statuses = ['closed', 'carried', 'resolved', 'no_longer_relevant'] as const;
+    for (const [i, status] of statuses.entries()) {
+      const response = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${questions[i].id}/disposition`, { status, sessionId });
+      assert.equal(response.statusCode, 200, response.body);
+      const settled: QuestionView = response.json();
+      assert.equal(settled.status, status);
+      assert.ok(settled.version > questions[i].version);
+      await watcher.next((m) => m.t === 'question' && m.question.id === questions[i].id && m.question.status === status);
+    }
+    const bad = await call('POST', member.cookie, `/api/groups/${groupId}/questions/${carried.id}/disposition`, { status: 'open' });
+    assert.equal(bad.statusCode, 400);
+    const decisions = await h.db.query<{ session_id: string }>('SELECT session_id FROM question_dispositions');
+    assert.equal(decisions.rowCount, 4);
+    assert.ok(decisions.rows.every((r) => r.session_id === sessionId));
+    await end(watcher, sessionId);
+
+    const next = await start(owner.cookie, groupId);
+    const view = await wrapUp(owner.cookie, groupId, next.sessionId);
+    assert.deepEqual(view.openQuestions.map((q) => q.id), [carried.id]);
+    assert.deepEqual(view.openQuestions[0].anchor, carried.anchor);
+    assert.deepEqual(view.openQuestions[0].replies.map((r) => r.body), ['Next time.']);
+    const snapshot = await watcher.join(next.sessionId);
+    assert.deepEqual(snapshot.questions.map((q) => q.id), [carried.id], 'the carried question is in the next study');
+    await closeClient(watcher);
+  });
+
+  test('S9.5 a starting point is set by explicit confirmation only, and a new study opens there', async () => {
+    const { owner, groupId } = await ownerAndMember();
+    const outsider = await signIn(h, 'outsider@example.test');
+    assert.equal((await confirm(outsider.cookie, groupId, null, 3)).statusCode, 403);
+    assert.equal((await call('GET', outsider.cookie, `/api/groups/${groupId}/progress`)).statusCode, 403);
+    const tooFar = await confirm(owner.cookie, groupId, null, 40);
+    assert.equal(tooFar.statusCode, 400);
+    assert.equal(tooFar.json().message, 'Verses must be within 1–32.');
+    const notImported = await call('POST', owner.cookie, `/api/groups/${groupId}/progress`, { basedOnId: null, ref: { bookId: 'ROM', chapter: 2, verse: 1 } });
+    assert.equal(notImported.statusCode, 400);
+
+    // A study that ends without a confirmation marks nothing.
+    const first = await start(owner.cookie, groupId);
+    const client = await connect(owner.cookie);
+    await end(client, first.sessionId);
+    assert.equal(await progress(owner.cookie, groupId), null);
+
+    assert.equal((await confirm(owner.cookie, groupId, null, 3)).statusCode, 201);
+    const next = await start(owner.cookie, groupId);
+    assert.ok(Math.abs(next.state.positionSeconds - 2 * verseSeconds) < 1e-9);
+    await closeClient(client);
   });
 });
