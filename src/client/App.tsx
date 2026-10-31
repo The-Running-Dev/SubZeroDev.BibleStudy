@@ -81,7 +81,12 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
   const [editing, setEditing] = useState(false);
   const [groups, setGroups] = useState<GroupSummary[] | null>(null);
   const [showGroup, setShowGroup] = useState(false);
-  const [studying, setStudying] = useState(false);
+  // A reminder email's Open study link lands on /study.
+  const [studying, setStudying] = useState(() => window.location.pathname === '/study');
+
+  useEffect(() => {
+    if (window.location.pathname === '/study') window.history.replaceState(null, '', '/');
+  }, []);
 
   useEffect(() => {
     api

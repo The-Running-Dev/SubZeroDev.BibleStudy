@@ -66,7 +66,7 @@ describe('meeting times', () => {
   test('S10.5 a member in Sofia sees 14:15 on a phone set to Tokyo, with the time it was set in', async () => {
     const page = await openGroup(member);
     const first = page.locator('.meetings li').first();
-    await first.getByText('Mon 2 Nov, 14:15 GMT+2').waitFor();
+    await first.getByText('Mon 2 Nov, 14:15 EET').waitFor();
     await first.getByText('(06:15 America/Chicago)').waitFor();
     assert.equal(await page.locator('.meetings li').count(), 8);
     if (process.env.E2E_SCREENSHOTS) await page.screenshot({ path: `${process.env.E2E_SCREENSHOTS}/meetings.png` });
@@ -77,9 +77,9 @@ describe('meeting times', () => {
     const second = page.locator('.meetings li').nth(1);
     await second.getByRole('button', { name: 'Move…' }).click();
     await second.getByLabel('Date').fill('2026-11-10');
-    await second.getByLabel('Time (GMT+2)').fill('15:30');
+    await second.getByLabel('Time (EET)').fill('15:30');
     await second.getByRole('button', { name: 'Move meeting' }).click();
-    await page.locator('.meetings li').nth(1).getByText('Tue 10 Nov, 15:30 GMT+2').waitFor();
+    await page.locator('.meetings li').nth(1).getByText('Tue 10 Nov, 15:30 EET').waitFor();
     const moved = (await meetings(owner)).find((m) => m.anchor.localDate === '2026-11-10');
     assert.deepEqual(moved?.anchor, { localDate: '2026-11-10', localTime: '07:30', timeZone: 'America/Chicago' });
 
@@ -101,7 +101,7 @@ describe('meeting times', () => {
     await second.getByRole('button', { name: 'Move…' }).click();
     // 09:30 in Sofia on 7 November 2027 is the second 01:30 in Chicago.
     await second.getByLabel('Date').fill('2027-11-07');
-    await second.getByLabel('Time (GMT+2)').fill('09:30');
+    await second.getByLabel('Time (EET)').fill('09:30');
     await second.getByRole('button', { name: 'Move meeting' }).click();
     await second.getByRole('alert').getByText('That time happens twice in America/Chicago that night.', { exact: false }).waitFor();
     assert.equal((await meetings(owner))[1].anchor.localDate, '2026-11-09');
@@ -110,7 +110,7 @@ describe('meeting times', () => {
   test('S10.4 a change made meanwhile is shown, not overwritten', async () => {
     const page = await openGroup(member);
     const first = page.locator('.meetings li').first();
-    await first.getByText('Mon 2 Nov, 14:15 GMT+2').waitFor();
+    await first.getByText('Mon 2 Nov, 14:15 EET').waitFor();
     const seen = (await meetings(owner))[0];
     const moved = await h.app.inject({
       method: 'PATCH',
@@ -122,7 +122,7 @@ describe('meeting times', () => {
 
     await first.getByRole('button', { name: 'Cancel meeting' }).click();
     await first.getByRole('alert').getByText('Someone changed this meeting first. Check it, then try again.').waitFor();
-    await first.getByText('Mon 2 Nov, 16:00 GMT+2').waitFor();
+    await first.getByText('Mon 2 Nov, 16:00 EET').waitFor();
     assert.equal((await meetings(owner))[0].status, 'scheduled');
   });
 
@@ -137,5 +137,41 @@ describe('meeting times', () => {
     await group.getByText('Meets Tuesdays at 19:00 (America/Chicago).').waitFor();
     await page.locator('.meetings li').first().getByText('Tue 3 Nov, 19:00 CST').waitFor();
     assert.equal(await page.locator('.meetings li').count(), 8);
+  });
+});
+
+describe('reminders', () => {
+  test('S11.3 a member chooses when reminders come, or turns them off, and it sticks', async () => {
+    const page = await openGroup(member);
+    const form = page.getByRole('form', { name: 'Reminders' });
+    assert.equal(await form.getByLabel('1 day before').isChecked(), true);
+    assert.equal(await form.getByLabel('1 hour before').isChecked(), true);
+    await form.getByLabel('1 day before').uncheck();
+    await form.getByLabel('1 hour before').uncheck();
+    await form.getByLabel('2 hours before').check();
+    await form.getByRole('button', { name: 'Save reminders' }).click();
+    await form.getByText('Reminders saved.').waitFor();
+    const saved = await h.app.inject({ method: 'GET', url: `/api/groups/${groupId}/reminders`, cookies: { bs_session: member } });
+    assert.deepEqual(saved.json(), { enabled: true, offsetsMinutes: [120] });
+
+    await form.getByLabel('Email me before meetings').uncheck();
+    assert.equal(await form.getByLabel('2 hours before').isDisabled(), true);
+    await form.getByRole('button', { name: 'Save reminders' }).click();
+    await form.getByText('Reminders saved.').waitFor();
+    await page.reload();
+    await page.getByRole('button', { name: 'Bible Study' }).click();
+    assert.equal(await page.getByRole('form', { name: 'Reminders' }).getByLabel('Email me before meetings').isChecked(), false);
+    const owners = await h.app.inject({ method: 'GET', url: `/api/groups/${groupId}/reminders`, cookies: { bs_session: owner } });
+    assert.deepEqual(owners.json(), { enabled: true, offsetsMinutes: [1440, 60] }, 'the other member’s are untouched');
+  });
+
+  test('S11.2 the Open study link lands on the study screen', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    contexts.push(context);
+    await context.addCookies([{ name: 'bs_session', value: member, url: baseUrl }]);
+    const page = await context.newPage();
+    await page.goto(`${baseUrl}/study`);
+    await page.getByRole('button', { name: 'Start study' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/', 'a reload afterwards opens the reader as usual');
   });
 });

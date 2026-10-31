@@ -20,6 +20,17 @@ export interface Outbox {
   enqueueEmail(tx: Queryable, job: EmailJobInput): Promise<{ jobId: string; created: boolean }>;
 }
 
+// Takes back emails nobody has started sending, e.g. a reminder for a meeting that moved. Returns the ids it took back;
+// a job already claimed by the worker is left to finish.
+export async function withdrawQueued(tx: Queryable, jobIds: string[], reason: string): Promise<string[]> {
+  if (!jobIds.length) return [];
+  const result = await tx.query<{ id: string }>(
+    `UPDATE email_jobs SET status = 'failed', last_error = $2, sealed_secrets = NULL WHERE id = ANY($1::uuid[]) AND status = 'queued' RETURNING id`,
+    [jobIds, reason],
+  );
+  return result.rows.map((row) => row.id);
+}
+
 export function createOutbox(deps: { clock: Clock; sealKey: Buffer }): Outbox {
   return {
     async enqueueEmail(tx, job) {

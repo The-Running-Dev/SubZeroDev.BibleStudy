@@ -54,10 +54,18 @@ export function instantFor(localDate: string, localTime: string, zone: string): 
   return new Date(candidates[0] ?? local - offsetAt(local - dayMs, zone)).toISOString();
 }
 
-// The zone's short name at that instant ("CST", or "GMT+2" where the runtime has no abbreviation).
+function shortZoneName(locale: string, ms: number, zone: string): string | undefined {
+  return new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'short' }).formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName')?.value;
+}
+
+const gmtOffset = /^GMT[+-]/;
+
+// The zone's short name at that instant: the US name ("CST"), else the British one ("EET", "BST"), else "GMT+9".
 export function zoneAbbreviation(ms: number, zone: string): string {
-  const part = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' }).formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName');
-  return part?.value ?? zone;
+  const us = shortZoneName('en-US', ms, zone);
+  if (us && !gmtOffset.test(us)) return us;
+  const gb = shortZoneName('en-GB', ms, zone);
+  return (gb && !gmtOffset.test(gb) ? gb : us) ?? zone;
 }
 
 export function localizeOccurrence(startsAt: string, zone: string): { localDate: string; localTime: string; abbreviation: string } {

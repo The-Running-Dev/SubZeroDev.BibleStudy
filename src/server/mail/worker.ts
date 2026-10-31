@@ -35,7 +35,7 @@ export function nextDelayMinutes(attempts: number): number | null {
 }
 
 export function fillPlaceholders(body: string, values: Record<string, string>): string {
-  return body.replace(/\{\{(\w+)\}\}/g, (match, name: string) => values[name] ?? match);
+  return body.replace(/\{\{(\w+)\}\}/g, (match, name: string) => (Object.hasOwn(values, name) ? values[name] : match));
 }
 
 export function createMailWorker(deps: { db: Db; clock: Clock; transport: MailTransport; sealKey: Buffer }): MailWorker {
@@ -73,12 +73,13 @@ export function createMailWorker(deps: { db: Db; clock: Clock; transport: MailTr
       return;
     }
     try {
-      const values = job.sealed_secrets ? (JSON.parse(unseal(deps.sealKey, job.sealed_secrets)) as Record<string, string>) : {};
+      // Only a job with sealed values has placeholders; a reminder's body is sent as written, braces and all.
+      const values = job.sealed_secrets ? (JSON.parse(unseal(deps.sealKey, job.sealed_secrets)) as Record<string, string>) : null;
       await deps.transport.send({
         to: job.to_address,
         subject: job.subject,
-        text: fillPlaceholders(job.text_body, values),
-        html: fillPlaceholders(job.html_body, values),
+        text: values ? fillPlaceholders(job.text_body, values) : job.text_body,
+        html: values ? fillPlaceholders(job.html_body, values) : job.html_body,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

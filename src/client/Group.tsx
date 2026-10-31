@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { CreatedInvitation, GroupView, InvitationView } from '../shared/api.ts';
 import { api, messageFor } from './api.ts';
+import { Reminders } from './Reminders.tsx';
 import { Meetings, ScheduleForm, weekdays } from './Schedule.tsx';
 
 export function GroupPanel(props: { groupId: string; userId: string }) {
@@ -50,6 +51,7 @@ export function GroupPanel(props: { groupId: string; userId: string }) {
         />
       )}
       <Meetings groupId={group.id} version={scheduleVersion} />
+      <Reminders groupId={group.id} />
       <h3>Members</h3>
       <ul className="members">
         {group.members.map((member) => (

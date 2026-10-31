@@ -9,6 +9,7 @@ import type { Db, Queryable, Tx } from '../platform/db.ts';
 import { withTransaction } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { isUuid, uuidv7 } from '../platform/ids.ts';
+import { suppressDeliveries } from '../reminders/reminders.ts';
 
 // Meeting occurrences (S10). The group's weekly schedule is materialized eight weeks ahead; each row keeps the
 // wall-clock date and time it was set in, and its instant is derived from them in that zone (I-06).
@@ -76,21 +77,29 @@ interface Schedule {
 }
 
 // Adds the schedule's slots from today through the window that are still ahead. A slot that already has a row, or a
-// day another meeting was moved onto, is left as it is.
-async function materialize(tx: Tx, clock: Clock, groupId: string, schedule: Schedule): Promise<void> {
+// day another meeting was moved onto, is left as it is. Returns how many were added.
+async function materialize(tx: Tx, clock: Clock, groupId: string, schedule: Schedule): Promise<number> {
   const now = clock.now().getTime();
   const today = wallClock(now, schedule.timeZone).localDate;
+  let added = 0;
   for (let day = 0; day <= windowDays; day++) {
     const date = addDays(today, day);
     if (isoWeekday(date) !== schedule.weekday) continue;
     const startsAt = instantFor(date, schedule.localTime, schedule.timeZone);
     if (Date.parse(startsAt) <= now) continue;
-    await tx.query(
+    const inserted = await tx.query(
       `INSERT INTO occurrences (id, group_id, slot_date, local_date, local_time, time_zone, starts_at, updated_at)
        VALUES ($1, $2, $3, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
       [uuidv7(now), groupId, date, schedule.localTime, schedule.timeZone, startsAt, new Date(now)],
     );
+    added += inserted.rowCount ?? 0;
   }
+  return added;
+}
+
+// The reminder tick keeps every group's window filled even when nobody opens the app (S11).
+export async function materializeAhead(tx: Tx, clock: Clock, groupId: string): Promise<number> {
+  return materialize(tx, clock, groupId, await lockedSchedule(tx, groupId, 'SHARE'));
 }
 
 async function lockedSchedule(tx: Tx, groupId: string, mode: 'SHARE' | 'UPDATE'): Promise<Schedule> {
@@ -221,7 +230,14 @@ export async function updateSchedule(deps: ScheduleDeps, userId: string, groupId
     );
     for (const row of ahead.rows) {
       if (isoWeekday(row.slot_date) !== schedule.weekday) {
-        if (row.status === 'scheduled' && row.planned_book_id === null) await tx.query('DELETE FROM occurrences WHERE id = $1', [row.id]);
+        if (row.status === 'scheduled' && row.planned_book_id === null) {
+          const pending = await tx.query<{ id: string; email_job_id: string | null }>(
+            `SELECT id, email_job_id FROM reminder_deliveries WHERE occurrence_id = $1 AND status = 'pending' FOR UPDATE`,
+            [row.id],
+          );
+          await suppressDeliveries(tx, pending.rows, now);
+          await tx.query('DELETE FROM occurrences WHERE id = $1', [row.id]);
+        }
         continue;
       }
       const startsAt = instantFor(row.slot_date, schedule.localTime, schedule.timeZone);

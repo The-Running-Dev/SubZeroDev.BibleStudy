@@ -10,6 +10,7 @@ import type {
   GroupView,
   InvitationView,
   OccurrenceView,
+  ReminderPreference,
   ScheduleRequest,
   UpdateOccurrenceRequest,
   ChapterView,
@@ -83,6 +84,8 @@ export const api = {
   updateOccurrence: (groupId: string, occurrenceId: string, change: UpdateOccurrenceRequest) =>
     call<OccurrenceView>('PATCH', `/api/groups/${groupId}/occurrences/${occurrenceId}`, change),
   updateSchedule: (groupId: string, schedule: ScheduleRequest) => call<GroupView>('PATCH', `/api/groups/${groupId}/schedule`, schedule),
+  reminders: (groupId: string) => call<ReminderPreference>('GET', `/api/groups/${groupId}/reminders`),
+  updateReminders: (groupId: string, preference: ReminderPreference) => call<ReminderPreference>('PUT', `/api/groups/${groupId}/reminders`, preference),
   translations: () => call<TranslationView[]>('GET', '/api/content/translations'),
   chapter: (translationId: TranslationId, bookId: string, chapter: number) => call<ChapterView>('GET', `/api/content/${translationId}/${bookId}/${chapter}`),
   // 202 while a recording is being prepared; the body lists what is ready so far.

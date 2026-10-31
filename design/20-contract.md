@@ -164,11 +164,19 @@ function instantFor(localDate: string, localTime: string, zone: IanaZone): IsoIn
 ### reminders
 
 ```ts
-// GET/PUT /api/groups/:groupId/reminders
-function getReminderPreference(groupId: Uuid): Promise<{ enabled: boolean; offsetsMinutes: number[] }>;
-function setReminderPreference(groupId: Uuid, pref: { enabled: boolean; offsetsMinutes: number[] }): Promise<{ enabled: boolean; offsetsMinutes: number[] }>;
-// in-process, run once a minute under an advisory lock
-function reminderTick(now: Date): Promise<{ materialized: number; enqueued: number; suppressed: number }>;
+type ReminderPreference = { enabled: boolean; offsetsMinutes: number[] };
+// GET /api/groups/:groupId/reminders: the caller's own preference; the default ([1440, 60], enabled) until they save one.
+function getReminderPreference(groupId: Uuid): Promise<ReminderPreference>;
+// PUT /api/groups/:groupId/reminders: replaces the caller's preference. Offsets come back sorted, longest first;
+// at most 5, each a whole number of minutes from 5 to 10080. The next tick suppresses pending reminders it no longer
+// covers, and owes again any it covers that were suppressed.
+function setReminderPreference(groupId: Uuid, pref: ReminderPreference): Promise<ReminderPreference>;
+// in-process, run once a minute under an advisory lock; deps carry the db, clock, outbox and public URL
+function reminderTick(deps: ReminderDeps): Promise<{ materialized: number; enqueued: number; suppressed: number }>;
+// A schedule change that deletes a meeting suppresses its pending reminders first, in the same transaction.
+function suppressDeliveries(tx: Tx, deliveries: { id: Uuid; email_job_id: Uuid | null }[], now: Date): Promise<number>;
+// The tick withdraws a reminder's job while it is still queued; a job already claimed is left to finish.
+function withdrawQueued(tx: Tx, jobIds: Uuid[], reason: string): Promise<Uuid[]>;
 ```
 
 ### mail
@@ -368,8 +376,8 @@ PostgreSQL 17. Migrations are forward-only, numbered SQL files applied in a tran
 | `memberships` | `(group_id, user_id)` | `role in ('owner','member')`; partial unique: one owner per group |
 | `invitations` | `id` | unique `token_hash`; `accepted_by` fk |
 | `occurrences` | `id` | unique `(group_id, slot_date)`; unique `(group_id, local_date)` among `scheduled`; index `starts_at` |
-| `reminder_preferences` | `(user_id, group_id)` | `offsets_minutes` int[] each between 5 and 10080 |
-| `reminder_deliveries` | `id` | unique `(occurrence_id, occurrence_revision, user_id, offset_minutes)`; index `(status, send_after)` |
+| `reminder_preferences` | `(user_id, group_id)` | `offsets_minutes` int[], at most 5, each between 5 and 10080 |
+| `reminder_deliveries` | `id` | unique `(occurrence_id, occurrence_revision, user_id, offset_minutes)`; index `(status, send_after)`; `email_job_id` fk, set when queued |
 | `email_jobs` | `id` | unique `idempotency_key`; index `(status, next_attempt_at)` |
 | `translations` | `id` | seeded |
 | `chapters` | `(translation_id, book_id, chapter)` | `content_sha256` not null |
@@ -413,6 +421,10 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `not_member` (403): not a current member. Retry: no.
 - `not_owner` (403): owner-only operation. Retry: no.
 - `invitation_invalid` (200, inside `verifyLoginCode` as `invitation: 'invalid'`): the invitation was revoked, expired or accepted. Retry: no. Ask the owner.
+
+**reminders**
+- `invalid_request` (400): an offset that is not a whole number of minutes from 5 to 10080, the same offset twice, more than 5 offsets, or a missing `enabled`. Retry: no.
+- `not_member` (403): the caller is not a current member of the group. Retry: no.
 
 **schedule**
 - `stale_revision` (409): the occurrence changed. Retry: no. Reload and reapply.
