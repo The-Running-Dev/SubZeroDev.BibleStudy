@@ -31,7 +31,6 @@ export type ErrorCode =
   | 'translation_unavailable'
   | 'chapter_not_found'
   | 'narration_unavailable'
-  | 'upstream_failed'
   | 'not_member'
   | 'not_owner'
   | 'no_active_session'
@@ -437,10 +436,12 @@ export type ServerMessage =
   | { t: 'assistant'; event: AssistantEvent }
   | { t: 'error'; error: ErrorCode; retryable: boolean };
 
-// Close codes the server ends a connection with. The client reconnects after none of them.
+// Close codes the server ends a connection with. The client reconnects after none of them except closeUnavailable.
 export const closeNotMember = 4403;
 export const closeSignedOut = 4401;
 export const closeTooMany = 4429;
+// The database is down: the client shows "Server unavailable" and reconnects with backoff.
+export const closeUnavailable = 4503;
 
 // ---- assistant ----
 

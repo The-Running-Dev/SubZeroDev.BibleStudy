@@ -1,6 +1,6 @@
 // demo-seed: fills an empty, migrated database (with Romans imported) with the synthetic demo group. Sends nothing.
-import { systemClock } from './clock.ts';
-import { createPool } from './db.ts';
+import { systemClock } from '../platform/clock.ts';
+import { createPool } from '../platform/db.ts';
 import { seedDemo } from './demo.ts';
 
 const url = process.env.DATABASE_URL;

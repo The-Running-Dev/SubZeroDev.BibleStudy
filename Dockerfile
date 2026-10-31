@@ -35,5 +35,5 @@ RUN mkdir -p /app/data/media /app/data/backups && chown -R node:node /app/data
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/__build-id').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/__health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 CMD ["node", "src/server/web/main.ts"]

@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { ClientMessage, DriftReport, ServerMessage, StudySessionResponse, WrapUpView } from '../../shared/api.ts';
-import { closeTooMany } from '../../shared/api.ts';
+import { closeTooMany, closeUnavailable } from '../../shared/api.ts';
 import { sessionIsValid } from '../identity/sessions.ts';
+import { databaseUnavailable } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { isUuid } from '../platform/ids.ts';
 import { log } from '../platform/log.ts';
@@ -151,7 +152,9 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
             socket.close(closeTooMany, 'too_many_connections');
           }
         })
-        .catch(() => undefined);
+        .catch((error: Error) => {
+          if (databaseUnavailable(error)) socket.close(closeUnavailable, 'unavailable');
+        });
 
       socket.on('close', () => {
         clearInterval(heartbeat);
@@ -176,7 +179,9 @@ export function registerStudyRoutes(app: FastifyInstance, deps: AppDeps, hub: Re
           .then(() => handle(raw))
           .catch((error: Error) => {
             log('error', 'realtime message failed', { error: error.message });
-            reply({ t: 'error', error: 'internal', retryable: true });
+            // Nothing on this channel works without the database; the client reconnects with backoff.
+            if (databaseUnavailable(error)) socket.close(closeUnavailable, 'unavailable');
+            else reply({ t: 'error', error: 'internal', retryable: true });
           });
       });
 

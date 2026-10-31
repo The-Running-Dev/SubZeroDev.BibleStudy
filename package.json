@@ -8,7 +8,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "demo:seed": "node --env-file-if-exists=.env src/server/platform/demo-cli.ts",
+    "demo:seed": "node --env-file-if-exists=.env src/server/demo/demo-cli.ts",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "test": "node --test \"tests/unit/**/*.test.ts\"",

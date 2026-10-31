@@ -75,7 +75,7 @@ Each invariant names the module that maintains it.
 
 ## Public surface
 
-Signatures are TypeScript declarations, without bodies. HTTP endpoints are JSON over the app's own origin. Every endpoint except the sign-in pair, `/__build-id` and static assets requires the session cookie.
+Signatures are TypeScript declarations, without bodies. HTTP endpoints are JSON over the app's own origin. Every endpoint except the sign-in pair, `/__build-id`, `/__health` and static assets requires the session cookie.
 
 ### Shared types
 
@@ -202,7 +202,8 @@ function listTranslations(): Promise<TranslationView[]>;
 function listBooks(translationId: TranslationId): Promise<{ bookId: BookId; name: string; chapters: number }[]>;
 // GET /api/content/:translation/:book/:chapter — 409 with Availability when not obtainable
 function getChapter(translationId: TranslationId, bookId: BookId, chapter: number): Promise<ChapterView>;
-// GET /api/content/:translation/:book/:chapter/recordings — may trigger on-demand import
+// GET /api/content/:translation/:book/:chapter/recordings — may trigger on-demand import.
+// 202 while any enabled narrator's recording is still being fetched (its id in `preparing`); the client polls again after 5 s.
 function listRecordings(translationId: TranslationId, bookId: BookId, chapter: number): Promise<{ recordings: RecordingView[]; preparing: string[]; failed: { narratorId: string; reason: string }[] }>;
 // GET /media/:sha256 — byte ranges, immutable cache headers
 // GET /api/content/:translation/:book/:chapter/download-manifest[?narration=true] — no-store; asset urls are the chapter route and /media/:sha256
@@ -252,6 +253,9 @@ type ServerMessage =
   | { t: 'error'; error: ErrorCode; retryable: boolean };
 
 interface Presence { userId: Uuid; displayName: string; connections: number; ready: boolean; }
+// Close codes (src/shared/api.ts). The client reconnects with backoff after 4503 only; after the others it stops and says why.
+//   4401 closeSignedOut: the session cookie ended.   4403 closeNotMember: no longer a member of the group.
+//   4429 closeTooMany: more than 8 open for the member.   4503 closeUnavailable: the database is down.
 // GET /api/groups/:groupId/session/:sessionId/drift-report
 function driftReport(groupId: Uuid, sessionId: Uuid): Promise<{ samples: number; p50Ms: number; p95Ms: number; maxMs: number; perClient: { clientId: Uuid; p95Ms: number }[] }>;
 ```
@@ -425,6 +429,7 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `code_invalid` (401): wrong code; attempts remain. Retry: no. The user retypes.
 - `code_expired` (401): expired, consumed, superseded or out of attempts. Retry: no. Request a new code.
 - `rate_limited` (429): more than 5 code requests per email per hour, or 20 per IP. Retry: after `retryAfterSeconds`.
+  - Also: more than 8 open WebSockets for one member (the upgrade is refused, or the socket closes with 4429), and too many WebSocket messages in a second (an `error` message). Retry: yes, after a pause.
 - `unauthenticated` (401): no valid session. Retry: no. Go to sign-in.
 
 **groups**
@@ -446,8 +451,8 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `narration_unavailable` (409): a download with narration asked for a chapter with no recording ready. Retry: yes while the narration is preparing, otherwise no. Offer text only.
 - `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. This includes a CSB chapter API.Bible could not supply (S13.4). Retry: no. Show the reason.
 - `chapter_not_found` (404): no such book or chapter. Retry: no.
-- `upstream_failed` (502): an on-demand import failed. Retry: yes, after backoff.
-- `preparing` (202): on-demand audio import is in progress. Retry: poll after 5 s.
+- `not_found` (404): a `/media/` request for a recording that is missing or not ready. Retry: no.
+- `preparing` is not an error: `listRecordings` answers 202 while a recording is fetched, and a fetch that fails is listed in `failed`.
 
 **study**
 - `rejected_stale`: a WebSocket `result`, not an error. Retry: no. Adopt the returned state.
@@ -471,12 +476,15 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 
 **assistant**
 - `assistant_not_permitted` (403): the caller is not the assistant owner. Retry: no.
-- `assistant_offline` (503): no connector link. Retry: no. The turn is not created.
+- `assistant_offline` (503): no connector link. Retry: yes, once the PC reconnects. The turn is not created.
 - `invalid_request` (400): a `noteIds` entry that is not one of the caller's own live notes, the same id twice, or more than 20. Retry: no. The turn is not created.
-- `turn_in_progress` (409): another turn is streaming or uncertain. Retry: no.
+- `turn_in_progress` (409): another turn is streaming or uncertain. Retry: yes, once that turn ends or is stopped.
+- `not_found` (404): no such conversation for the owner. Retry: no.
 
 **any module**
-- `unavailable` (503): the database is down. Retry: yes, with backoff.
+- `unavailable` (503): the database is down. Retry: yes, with backoff. A WebSocket closes with 4503 instead.
+- `not_found` (404): no route matches. Retry: no.
+- `invalid_request` (403): a WebSocket upgrade whose `Origin` is not the app's own. Retry: no.
 - `internal` (500): unexpected; logged with a request id. Retry: no automatic retry.
 
 **mail** (internal only)

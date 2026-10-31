@@ -5,10 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { acceptInvitationById, bootstrapOwner, createInvitation } from '../groups/groups.ts';
 import { pushOps } from '../personal/personal.ts';
 import { postQuestion, postReply } from '../questions/questions.ts';
-import type { Clock } from './clock.ts';
-import type { Db } from './db.ts';
-import { withTransaction } from './db.ts';
-import { uuidv7 } from './ids.ts';
+import type { Clock } from '../platform/clock.ts';
+import type { Db } from '../platform/db.ts';
+import { withTransaction } from '../platform/db.ts';
+import { uuidv7 } from '../platform/ids.ts';
 
 export const demoDomain = 'example.test';
 const members = [

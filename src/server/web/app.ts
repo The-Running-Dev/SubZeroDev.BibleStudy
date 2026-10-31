@@ -9,6 +9,7 @@ import type { Outbox } from '../mail/outbox.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Config } from '../platform/config.ts';
 import type { Db } from '../platform/db.ts';
+import { databaseUnavailable } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { log } from '../platform/log.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
@@ -107,8 +108,7 @@ export async function buildApp(input: AppDeps): Promise<FastifyInstance> {
     if (fastifyError.statusCode && fastifyError.statusCode >= 400 && fastifyError.statusCode < 500) {
       return reply.status(400).send({ error: 'invalid_request', message: fastifyError.message ?? 'Bad request.', retryable: false });
     }
-    const pgCode = fastifyError.code ?? '';
-    if (pgCode === 'ECONNREFUSED' || pgCode.startsWith('08') || pgCode === '57P01') {
+    if (databaseUnavailable(fastifyError)) {
       return reply.status(503).send({ error: 'unavailable', message: 'The service is temporarily unavailable.', retryable: true });
     }
     log('error', 'request failed', { requestId: request.id, method: request.method, url: request.url.split('?')[0], error: fastifyError.message });
@@ -118,6 +118,17 @@ export async function buildApp(input: AppDeps): Promise<FastifyInstance> {
   app.get('/__build-id', async (_request, reply) => {
     reply.header('cache-control', 'no-store');
     return { buildId: config.buildId };
+  });
+
+  // The container's health check: unhealthy while the database cannot answer. Portainer shows it; the restart policy acts on exit only.
+  app.get('/__health', async (_request, reply) => {
+    reply.header('cache-control', 'no-store');
+    try {
+      await deps.db.query('SELECT 1');
+    } catch {
+      return reply.status(503).send({ error: 'unavailable', message: 'The database is unavailable.', retryable: true });
+    }
+    return { ok: true };
   });
 
   const hub = deps.hub ?? createRealtimeHub();

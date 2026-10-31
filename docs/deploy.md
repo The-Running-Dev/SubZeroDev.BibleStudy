@@ -16,7 +16,7 @@ merge to main ─▶ deploy.yml builds the image ─▶ ghcr.io/the-running-dev/
 | `biblestudy` | The web server. Joins the reverse proxy's network as `biblestudy-app:3000`. Keeps recordings on the named volume `media`. Publishes no port. |
 | `backup` | Writes a backup at start when the newest is more than a day old, then every day at `BACKUP_AT` (UTC), and keeps the newest `BACKUP_KEEP`. Its health check is unhealthy once the newest run is older than `BACKUP_HEALTH_HOURS` (default 26). |
 
-The app also migrates on start and exits non-zero if that fails, before it listens, so nothing ever serves a half-migrated schema. The image's health check is `GET /__build-id`.
+The app also migrates on start and exits non-zero if that fails, before it listens, so nothing ever serves a half-migrated schema. The image's health check is `GET /__health`, which answers 503 while the database cannot. Portainer then shows the app unhealthy; the restart policy acts on an exit only, so the app is not restarted, and it serves again once the database is back.
 
 **A failed migration takes the site down.** Compose stops the running app before it waits on `migrate`, so when a new image's migration fails, `up` fails with nothing of that migration applied and no app running. Redeploy the previous image ([Rolling back](#rolling-back)); the drill checks both halves.
 
