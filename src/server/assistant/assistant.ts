@@ -14,6 +14,7 @@ import { terminalTurnStatuses } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { formatReference, maxVerse } from '../../shared/reference.ts';
 import { getChapter, parseTranslationId } from '../content/catalog.ts';
+import type { Csb } from '../content/catalog.ts';
 import { ownNotes } from '../personal/personal.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Config } from '../platform/config.ts';
@@ -55,6 +56,7 @@ export interface AssistantDeps {
   clock: Clock;
   config: Config;
   hub: RealtimeHub;
+  csb: Csb | null;
 }
 
 interface TurnRow {
@@ -213,7 +215,7 @@ export function dispatchText(
 }
 
 export function createAssistant(deps: AssistantDeps): Assistant {
-  const { db, clock, config, hub } = deps;
+  const { db, clock, config, hub, csb } = deps;
   let link: Link | null = null;
   let offlineSince: Date | null = null;
   // Interrupts asked for before the runtime named the turn; sent once `accepted` arrives.
@@ -520,7 +522,7 @@ export function createAssistant(deps: AssistantDeps): Assistant {
       if (!online()) throw offline();
 
       if (!bookById(input.ref.bookId)) throw invalid(`${input.ref.bookId} is not a book.`);
-      const chapter = JSON.parse((await getChapter(db, input.translationId, input.ref.bookId, input.ref.chapter)).body) as ChapterView;
+      const chapter = JSON.parse((await getChapter(db, input.translationId, input.ref.bookId, input.ref.chapter, csb)).body) as ChapterView;
       const end = input.ref.endVerse ?? input.ref.startVerse;
       if (end !== null && end > chapter.verseCount) throw invalid(`${formatReference({ ...input.ref, startVerse: null, endVerse: null })} has ${chapter.verseCount} verses.`);
       const verses = chapter.verses

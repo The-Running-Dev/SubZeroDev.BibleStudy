@@ -300,13 +300,13 @@ describe('Romans imported live from AO Lab', () => {
       translations.map((t: { id: string; availability: unknown }) => [t.id, t.availability]),
       [
         ['BSB', { state: 'available' }],
-        ['CSB', { state: 'not_configured', reason: 'CSB text not available from a licensed source' }],
+        ['CSB', { state: 'not_configured', reason: "CSB needs the owner's API.Bible key (APIBIBLE_KEY)." }],
       ],
     );
     const csb = await get('/api/content/CSB/ROM/1');
     assert.equal(csb.statusCode, 409);
     assert.equal(csb.json().error, 'translation_unavailable');
-    assert.equal(csb.json().message, 'CSB text not available from a licensed source');
+    assert.equal(csb.json().message, "CSB needs the owner's API.Bible key (APIBIBLE_KEY).");
     assert.equal((await get('/api/content/books?translation=CSB')).statusCode, 409);
   });
 

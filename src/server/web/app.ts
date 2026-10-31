@@ -14,6 +14,8 @@ import { log } from '../platform/log.ts';
 import { sessionCookie, setSessionCookie } from './cookies.ts';
 import { registerAssistantRoutes } from './assistant-routes.ts';
 import { registerContentRoutes } from './content-routes.ts';
+import { createApiBible } from '../content/apibible.ts';
+import type { Csb } from '../content/catalog.ts';
 import { registerGroupRoutes } from './group-routes.ts';
 import { registerIdentityRoutes } from './identity-routes.ts';
 import { registerProgressRoutes } from './progress-routes.ts';
@@ -57,10 +59,14 @@ export interface AppDeps {
   onAudioQueued?: () => void;
   // Open realtime connections; tests pass their own to watch them.
   hub?: RealtimeHub;
+  // API.Bible for CSB; built from config.apibible when not given, null without a key.
+  csb?: Csb | null;
 }
 
-export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const { config } = deps;
+export async function buildApp(input: AppDeps): Promise<FastifyInstance> {
+  const { config } = input;
+  const csb = input.csb !== undefined ? input.csb : config.apibible ? { api: createApiBible(config.apibible, input.clock), clock: input.clock } : null;
+  const deps: AppDeps = { ...input, csb };
   // A hop count trusts that many proxies nearest the server, the same rule proxy-addr applies to a number.
   const hops = config.trustProxy;
   const trustProxy = typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;

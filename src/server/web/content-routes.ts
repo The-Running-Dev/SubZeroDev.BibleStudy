@@ -28,17 +28,17 @@ export function parseRange(header: string | undefined, size: number): { start: n
 const missingMedia = (reason: string) => new AppError('not_found', 404, `Narration unavailable for this chapter: ${reason}`);
 
 export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void {
-  app.get('/api/content/translations', async () => listTranslations(deps.db));
+  app.get('/api/content/translations', async () => listTranslations(deps.db, deps.csb ?? null));
 
   app.get('/api/content/books', async (request) => {
     const query = request.query as Record<string, unknown>;
-    return listBooks(deps.db, parseTranslationId(query.translation));
+    return listBooks(deps.db, parseTranslationId(query.translation), deps.csb ?? null);
   });
 
   app.get('/api/content/:translation/:book/:chapter', async (request, reply) => {
     const params = request.params as { translation: string; book: string; chapter: string };
     const chapter = /^\d{1,3}$/.test(params.chapter) ? Number(params.chapter) : NaN;
-    const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter);
+    const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter, deps.csb ?? null);
     const etag = stored.etag;
     reply.header('etag', etag).header('cache-control', 'private, no-cache');
     if (request.headers['if-none-match'] === etag) return reply.status(304).send();

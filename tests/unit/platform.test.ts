@@ -52,6 +52,18 @@ describe('loadConfig', () => {
     assert.equal(config.buildId, 'dev');
   });
 
+  test('S13 API.Bible is off without a key, and a key needs the CSB Bible id', () => {
+    assert.equal(loadConfig(base).apibible, null);
+    assert.deepEqual(loadConfig({ ...base, APIBIBLE_KEY: 'k', APIBIBLE_CSB_BIBLE_ID: 'csb-id' }).apibible, {
+      key: 'k',
+      bibleId: 'csb-id',
+      baseUrl: 'https://rest.api.bible/v1',
+    });
+    assert.equal(loadConfig({ ...base, APIBIBLE_KEY: 'k', APIBIBLE_CSB_BIBLE_ID: 'csb-id', APIBIBLE_BASE_URL: 'http://127.0.0.1:9/v1/' }).apibible?.baseUrl, 'http://127.0.0.1:9/v1');
+    assert.throws(() => loadConfig({ ...base, APIBIBLE_KEY: 'k' }), /APIBIBLE_CSB_BIBLE_ID is required when APIBIBLE_KEY is set/);
+    assert.throws(() => loadConfig({ ...base, APIBIBLE_KEY: 'replace-with-your-api-bible-key', APIBIBLE_CSB_BIBLE_ID: 'csb-id' }), /APIBIBLE_KEY is still the example placeholder/);
+  });
+
   test('names every missing or weak variable', () => {
     assert.throws(() => loadConfig({}), /DATABASE_URL is required; APP_SECRET is required; SMTP_URL is required/);
     assert.throws(() => loadConfig({ ...base, APP_SECRET: 'short' }), /APP_SECRET must be at least 32 characters/);

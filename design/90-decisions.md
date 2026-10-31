@@ -8,6 +8,19 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-10-31 — S13: CSB is fetched per chapter from API.Bible by the server; Fair Use is reported by the browser
+- **Context:** S13 serves CSB only from API.Bible (I-11), keeps no copy past 14 days, and reports Fair Use as the API terms require, including for displays made offline. No API.Bible key exists yet, so the live call (S13.3) cannot be run.
+- **Chosen:**
+  - The key stays on the server (`APIBIBLE_KEY`, `APIBIBLE_CSB_BIBLE_ID`, optional `APIBIBLE_BASE_URL`). A chapter is fetched on first read with `content-type=json` and `fums-version=3`, normalized to the same `ChapterContent` as BSB, and stored with `expiresAt = fetchedAt + 14 days` and its Fair Use token.
+  - Expired CSB rows are deleted before any refetch, so the 14-day limit holds even when API.Bible is down. A fetch that fails answers 409 `translation_unavailable` with the reason (S13.4), not `upstream_failed`.
+  - 401 and 403 both mean "API.Bible rejected the key" (recorded: no key is 401, an unknown key is 403). 404 means the Bible id is wrong or CSB access is not granted; 429 is the request limit.
+  - Availability probes `GET /bibles/{id}`; a success stands for an hour and a failure for a minute, so the translations list does not spend the 5,000 monthly calls.
+  - The copyright notice shown under CSB is the one API.Bible sends with the text; it replaces the seeded notice.
+  - Fair Use: on each display the browser calls `https://fums.api.bible/f3?t=<token>&dId=<device>&sId=<session>&uId=<sha256 of user id>`, the v3 format in https://docs.api.bible/guides/fair-use. Reports wait in `localStorage` while the call fails and go out on the `online` event, at most 20 tokens per call and 500 held.
+- **Rejected:** reporting Fair Use from the server. The call is meant to come from the device that shows the text, and offline displays would never reach the server.
+- **Rejected:** parsing API.Bible's HTML content. The JSON form carries verse ids on each text node.
+- **Unresolved:** whether a cached token may be reported again (see the contract), and the exact JSON node shape, which the docs do not specify; the parser follows the shape API.Bible's JSON content uses and is checked against the real service once the key exists.
+
 ### 2026-10-31 — S12: notes and the solo position sync through one ordered change feed; the display translation lives in the study view
 - **Context:** S12 needs private notes and a solo place that no group endpoint can reach (I-21), operations applied once (I-22), and a personal display translation that leaves the group's shared one alone.
 - **Chosen:**

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { AoChapter } from '../../src/server/content/aolab.ts';
+import { normalizeApiChapter } from '../../src/server/content/apibible.ts';
+import type { ApiNode } from '../../src/server/content/apibible.ts';
 import { contentHash, normalizeChapter, serializeContent, verseText } from '../../src/server/content/normalize.ts';
 import { adjacentChapter, books } from '../../src/shared/books.ts';
 import { formatReference, parseReference } from '../../src/shared/reference.ts';
@@ -141,5 +143,47 @@ describe('normalizing AO Lab chapters', () => {
     assert.equal(a, b);
     assert.equal(a, '{"verses":[{"number":1,"text":"a"}],"headings":[],"footnotes":[]}');
     assert.match(contentHash(a), /^[0-9a-f]{64}$/);
+  });
+});
+
+// Synthetic API.Bible JSON content (content-type=json): no CSB text is kept in this repository.
+describe('S13 normalizing API.Bible chapters', () => {
+  const text = (value: string, verseId: string): ApiNode => ({ type: 'text', text: value, attrs: { verseId } });
+  const verse = (n: number): ApiNode => ({ type: 'tag', name: 'verse', attrs: { number: String(n), style: 'v' }, items: [{ type: 'text', text: String(n) }] });
+  const para = (style: string, items: ApiNode[]): ApiNode => ({ type: 'tag', name: 'para', attrs: { style }, items });
+
+  test('joins verse pieces, keeps headings and poetry lines, and drops references and other chapters', () => {
+    const nodes: ApiNode[] = [
+      para('s1', [{ type: 'text', text: 'First   heading ' }]),
+      para('p', [
+        verse(1),
+        text('Alpha begins ', 'ROM.1.1'),
+        { type: 'tag', name: 'char', attrs: { style: 'wj' }, items: [text('in red.', 'ROM.1.1')] },
+        verse(2),
+        text('Beta runs', 'ROM.1.2'),
+      ]),
+      para('p', [text('across a paragraph.', 'ROM.1.2'), { type: 'tag', name: 'note', attrs: { style: 'f' }, items: [text('a note', 'ROM.1.2')] }]),
+      para('r', [{ type: 'text', text: '(Gen 1:1)' }]),
+      para('s1', [{ type: 'text', text: 'A song' }]),
+      para('q1', [verse(3), text('Line one', 'ROM.1.3')]),
+      para('q2', [text('line two', 'ROM.1.3')]),
+      para('p', [text('Not this chapter', 'ROM.2.1')]),
+    ];
+    assert.deepEqual(normalizeApiChapter(nodes, 'ROM', 1), {
+      verses: [
+        { number: 1, text: 'Alpha begins in red.' },
+        { number: 2, text: 'Beta runs across a paragraph.' },
+        { number: 3, text: 'Line one\nline two' },
+      ],
+      headings: [
+        { beforeVerse: 1, text: 'First heading' },
+        { beforeVerse: 3, text: 'A song' },
+      ],
+      footnotes: [],
+    });
+  });
+
+  test('a chapter with no verse text normalizes to no verses', () => {
+    assert.deepEqual(normalizeApiChapter([para('p', [{ type: 'text', text: 'untagged' }])], 'ROM', 1).verses, []);
   });
 });

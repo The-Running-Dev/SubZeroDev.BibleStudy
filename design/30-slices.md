@@ -220,7 +220,7 @@ Acceptance:
 Out of scope: offline saving and conflicts (S15).
 
 ## S13 — Read CSB when the owner's key is set
-Status: todo
+Status: done
 Delivers: Once the owner adds their free API.Bible key, members can read the CSB, with its copyright notice shown and the text refreshed as the licence requires. Without the key they are told why it is missing.
 Touches: content (CSB source, expiry, FUMS token), client reader
 Depends on: S2

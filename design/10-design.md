@@ -427,7 +427,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 **API.Bible key missing, revoked, over quota or CSB access not granted**
 - Detected by: configuration check or 401/403/429.
 - System: CSB availability becomes `not_configured` or `unavailable` with the reason. Stored CSB text is shown until its `expiresAt`, never after.
-- Users see: CSB stays selectable, and the reader shows "CSB text not available from a licensed source: <reason>" (D-2026-10-30-04).
+- Users see: CSB stays selectable, and the reader shows the reason, for example "API.Bible rejected the key" (D-2026-10-30-04).
 
 **Skynet connector offline**
 - Detected by: no link, or no heartbeat for 30 s.

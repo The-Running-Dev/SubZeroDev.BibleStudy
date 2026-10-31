@@ -23,7 +23,7 @@ export function connectorAuthorized(request: FastifyRequest, token: string | nul
 }
 
 export function registerAssistantRoutes(app: FastifyInstance, deps: AppDeps, hub: RealtimeHub): Assistant {
-  const assistant = createAssistant({ db: deps.db, clock: deps.clock, config: deps.config, hub });
+  const assistant = createAssistant({ db: deps.db, clock: deps.clock, config: deps.config, hub, csb: deps.csb ?? null });
   app.addHook('onClose', async () => assistant.stop());
 
   app.get('/api/assistant/status', async (request): Promise<AssistantStatus> => assistant.status(requireAuth(request).userId));

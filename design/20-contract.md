@@ -433,9 +433,9 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 - `invalid_request` (400): a malformed change, an empty one, a passage that is not a chapter of the book or uses a verse number above 176 (the chapter's own verse count is checked once its text is imported, S13), a move to a time already past or more than ten years ahead, or a `from`/`to` that is not an ISO instant between 2000 and 2200. Retry: no.
 
 **content**
-- `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. Retry: no. Show the reason.
+- `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. This includes a CSB chapter API.Bible could not supply (S13.4). Retry: no. Show the reason.
 - `chapter_not_found` (404): no such book or chapter. Retry: no.
-- `upstream_failed` (502): an on-demand import or CSB fetch failed. Retry: yes, after backoff.
+- `upstream_failed` (502): an on-demand import failed. Retry: yes, after backoff.
 - `preparing` (202): on-demand audio import is in progress. Retry: poll after 5 s.
 
 **study**
@@ -476,8 +476,8 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 
 ## Unresolved
 
-- **Fair Use Management reporting for CSB.** The exact client-side call format, and how offline displays queue their report. The design places a `fums` token on `ChapterView`, but the call shape waits on the API.Bible documentation available after the owner's account exists.
 - **API.Bible Bible ID for CSB.** This is configuration (`APIBIBLE_CSB_BIBLE_ID`), not a signature, and is known only once the owner's access is granted.
+- **Reusing a cached Fair Use token.** S13 reports the token stored with the chapter on every display, including displays of a cached copy. The API.Bible fair-use guide does not say whether a token may be reported again; this is confirmed or changed once the owner's account is live.
 - **AgentConsole provider for the connector.**
   - `codex-cli` supports a `read-only` sandbox.
   - `claude-cli` supports none and relies on the deny-all permission policy.
