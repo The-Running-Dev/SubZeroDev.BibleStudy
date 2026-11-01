@@ -1,6 +1,7 @@
 import type {
   AssistantEvent,
   AssistantStatus,
+  ConnectorStatus,
   AssistantTranscript,
   AssistantTurnStatus,
   ChapterView,
@@ -41,6 +42,8 @@ export interface LinkSocket {
 
 export interface Assistant {
   status(userId: string): Promise<AssistantStatus>;
+  // Internal projection for the owner status route; authorization belongs to that route.
+  connectorStatus(): ConnectorStatus;
   latestConversation(userId: string): Promise<{ id: string | null }>;
   createConversation(userId: string): Promise<{ id: string }>;
   transcript(userId: string, conversationId: string, afterSeq: number): Promise<AssistantTranscript>;
@@ -459,7 +462,13 @@ export function createAssistant(deps: AssistantDeps): Assistant {
     }
   }
 
+  function connectorStatus(): ConnectorStatus {
+    if (!config.assistantOwnerEmail || !config.connectorToken) return { state: 'not_configured' };
+    return online() ? { state: 'online' } : { state: 'offline', since: offlineSince ? offlineSince.toISOString() : null };
+  }
+
   return {
+    connectorStatus,
     async status(userId) {
       try {
         await requireOwner(userId);

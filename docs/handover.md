@@ -92,6 +92,6 @@ Each needs something only the owner can provide. Nothing here was replaced by a 
 - One group per instance. The data model is keyed by group, so a second group needs no migration, but there is no UI for it.
 - The study assistant is the owner's alone and needs their PC on with the connector running.
 - Codes and reminders go only through the relay in `SMTP_URL`; until a real one is set, they reach no one outside Mailpit.
-- The owner's status page (mail failures, health) is designed but not built; it needs a slice from `/plan`.
+- S20 adds Account → Operational status for the active group owner: retained email failures/retries and connector state, with explicit refresh. See [operational-status.md](operational-status.md). It does not probe SMTP, inbox delivery or provider health; local validation, CI and live deployment checks are reported separately in its PR.
 - An unhealthy app (database down) shows unhealthy in Portainer and is not restarted; it serves again once the database is back.
 - Layout was checked in Chromium's emulation, not in Safari. iOS-specific behaviour (keyboard resizing, standalone safe areas) is unverified until S17.4.
