@@ -376,7 +376,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 - Users see:
   - a sign-in screen that says "Code not sent yet — retrying" after 30 s, with the server's real job status;
   - reminders that are late but never duplicated.
-- Left behind: the `failed` job and its last error, shown on the owner's status page.
+- Left behind: the `failed` job and its last error. Account → Operational status (S20) shows a fixed safe failure category and guidance, recipient, attempts and job ID; the raw error stays on the server. Transient retries and suppressed reminders are distinct from terminal failures.
 
 **Login code wrong, expired or reused**
 - Detected by: hash mismatch, `expiresAt` or `consumedAt`.

@@ -179,6 +179,16 @@ function suppressDeliveries(tx: Tx, deliveries: { id: Uuid; email_job_id: Uuid |
 function withdrawQueued(tx: Tx, jobIds: Uuid[], reason: string): Promise<Uuid[]>;
 ```
 
+### owner operational status (S20)
+
+`GET /api/owner/status` requires a session and an active owner membership of the one v1 group (401/403 otherwise), independently of assistant permission. It responds with `OwnerStatus` from `src/shared/api.ts` and `Cache-Control: no-store`:
+
+- `checkedAt`: snapshot time.
+- `assistant`: `{state: 'online'}`, `{state: 'offline', since}` or `{state: 'not_configured'}`. Uses the existing link state; no provider readiness claim.
+- `mail.counts`: retained totals for terminal `failed` (excluding suppression), `retrying` (queued after an attempt or sending after more than one attempt), first-attempt `queued`, all `sending`, relay-accepted `sent`, and `suppressed`. Sending retries appear in both `retrying` and `sending`; these are labelled, not additive categories.
+- `mail.failed`, `mail.retrying`: newest 50 per list, ordered by creation time and ID descending, plus `limit: 50`. Entries contain only ID, kind, recipient, state, attempts, creation/next-attempt time and fixed safe failure summary/action. Terminal jobs have no next attempt. Suppressed jobs are not listed as failures. Empty lists are explicit; truncated lists retain their full total.
+- No raw last-error text, email bodies, sealed secrets, codes, idempotency keys, provider IDs, credentials, runtime IDs or operational configuration. A read failure is an error, never an empty healthy snapshot. The client refreshes explicitly and clears the previous snapshot before a new request.
+
 ### mail
 
 ```ts
@@ -504,4 +514,4 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
   - `claude-cli` supports none and relies on the deny-all permission policy.
   - Which provider holds DOD-22 is decided by the connector slice's live test of a tool attempt. The `hello` message reports what was used.
 - **Narrator `david`.** Whether it is the Gilbert recording the publisher licenses as CC0. It stays disabled (I-14) until its license source is recorded at import.
-- **The owner's status page.** Its layout and fields beyond email job failures, connector status and import manifests.
+- **Optional owner status extensions.** S20 covers email failures/retries and connector status only. Import manifests stay in the existing import workflow; an additional manifest view needs its own scope.

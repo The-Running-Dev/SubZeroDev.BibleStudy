@@ -160,3 +160,7 @@ See [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) for AI assistant guideline
 ## License
 
 [Add license information]
+
+### Owner operational status
+
+Open your Account menu, then **Operational status** to inspect retained email failures, scheduled retries and the study assistant connector. Access is restricted on the server to the active group owner. See [the operating notes](docs/operational-status.md) for fields, safe failure guidance and limits.

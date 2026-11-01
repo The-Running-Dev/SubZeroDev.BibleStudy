@@ -11,6 +11,7 @@ import { Reader } from './Reader.tsx';
 import { onAccountSwitch, onUpdateReady, requestUpdate, switchAccount, updateReady } from './shell.ts';
 import type { UpdateResult } from './shell.ts';
 import { SignIn } from './SignIn.tsx';
+import { OwnerStatusPanel } from './OwnerStatus.tsx';
 import { Study } from './Study.tsx';
 
 type State =
@@ -149,6 +150,7 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
   const [editing, setEditing] = useState(false);
   const [groups, setGroups] = useState<GroupSummary[] | null>(null);
   const [showGroup, setShowGroup] = useState(false);
+  const [showStatus, setShowStatus] = useState(false);
   // A reminder email's Open study link lands on /study.
   const [studying, setStudying] = useState(() => window.location.pathname === '/study');
 
@@ -216,6 +218,12 @@ function Home(props: { profile: Profile; notice: string | null; onChange: (profi
           <button type="button" className="secondary" onClick={signOut}>
             Sign out
           </button>
+          {groups?.some((g) => g.role === 'owner') && (
+            <button type="button" className="secondary" aria-expanded={showStatus} onClick={() => setShowStatus(!showStatus)}>
+              Operational status
+            </button>
+          )}
+          {showStatus && <OwnerStatusPanel />}
           <DownloadsList userId={props.profile.id} />
           <InstallHelp />
         </section>

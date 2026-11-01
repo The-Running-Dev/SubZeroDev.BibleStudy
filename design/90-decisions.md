@@ -5,10 +5,19 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 ## Open
 - Which real phones run the device checks (DOD-23, DOD-28, DOD-29).
 - Whether `biblestudy.subzerodev.com` is the hostname, and who adds its DNS record and proxy route.
-- The owner's status page is promised (10-design failure modes, the contract's mail errors, D-2026-10-30-15) but not built. Escalated to `/plan` for a slice.
 - Whether the owner's CSB licence covers serving the imported text on the public site behind sign-in (2026-11-01). The code imports it; the licence is the owner's to confirm.
 
 ---
+
+### 2026-11-01 — S20: owner operational status is a read-only projection
+- **Context:** The post-S18 reconciliation explicitly deferred the promised status page to planning. Main at `64e8d9d` includes the reconciliation and the subsequent CSB/deployment work, but no page. Open PR #25 separately reserves S19 for imported-CSB access; this independent status feature uses S20 and ADR-0004 without repeating S18.
+- **Chosen:** Account → Operational status reads `GET /api/owner/status`. The server checks the caller's active owner membership using the existing group lookup before reading global mail records; v1 has one group. Assistant permission is separate.
+- **Chosen:** Read existing email jobs in one read-only repeatable-read transaction, with retained totals and at most 50 newest failed jobs and 50 newest retries. Suppressed reminders use the existing `reminder suppressed` marker and are counted separately. Sending retries remain retrying; terminal failures include exhausted transient retries and expired login codes.
+- **Chosen:** Show recipient, kind, attempts, creation/next-attempt times and job ID. Replace arbitrary stored SMTP text with fixed failure categories and recovery guidance. Bodies, sealed secrets, idempotency keys and provider IDs are not selected. The existing raw last error remains in persistence/server logs; the owner can correlate by job ID.
+- **Chosen:** Project online/offline from the assistant's existing hello/link/heartbeat state, plus not configured when either assistant setting is missing. No connector/provider details or runtime IDs reach this API. No new protocol or provider probe.
+- **Chosen:** Explicit refresh, timestamp and `no-store`; refreshing clears the previous snapshot on failure or revoked access. This is retained operational evidence, not SMTP/inbox/worker liveness monitoring. Best-effort VPS availability and the existing deployment pipeline remain in place.
+- **Rejected:** Rendering a redacted raw SMTP error: SMTP servers may echo credentials, login codes or message contents in arbitrary formats.
+- **Rejected:** Mail resend controls, external subscriptions, paging, import administration or a new health service. They exceed the missing feature. Import manifests remain in the existing import workflow.
 
 ### 2026-11-01 — Deploy as SubZeroDev.Adventures does, with its two checks
 - **Context:** The owner asked to deploy the way SubZeroDev.Adventures does. Both already publish to GHCR and redeploy a Portainer Git stack by webhook. Adventures also tests the exact image before publishing it, and after the redeploy waits for the site to serve the new revision; BibleStudy did neither.
