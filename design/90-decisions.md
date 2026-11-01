@@ -10,6 +10,13 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-11-01 — Imported CSB has an owner-only access boundary
+- **Context:** sign-in without membership previously permitted imported chapter and offline-manifest requests; possession of XML establishes no redistribution rights.
+- **Chosen:** `CSB_IMPORTED_ACCESS=owner` by default, bound to the verified `OWNER_EMAIL` account, or `disabled` for nobody. Unset owner denies all. No member/group/assistant-role grant. Catalog, chapter/conditional requests, manifests, offline copies and assistant loading use the boundary. API.Bible's existing 14-day expiry stays.
+- **Offline:** new imported copies carry the account id; the updated client discards legacy unscoped imports. Previously obtained files cannot be recalled, and disconnected owner copies cannot be remotely revoked.
+- **Rejected:** automatic group sharing, assuming an XML purchase grants distribution, or treating an API key as permission for imported text.
+- **Open:** owner confirmation of the actual licence's audience and permitted hosted/offline/assistant uses. Owner-only is containment, not licensing approval. See [ADR-0003](../docs/decisions/0003-imported-csb-access.md) for options and source references.
+
 ### 2026-11-01 — Deploy as SubZeroDev.Adventures does, with its two checks
 - **Context:** The owner asked to deploy the way SubZeroDev.Adventures does. Both already publish to GHCR and redeploy a Portainer Git stack by webhook. Adventures also tests the exact image before publishing it, and after the redeploy waits for the site to serve the new revision; BibleStudy did neither.
 - **Chosen:** `deploy.yml` builds the image locally, runs the stack drill on it, and pushes `:<sha>` and `:latest` only if the drill passes. With the repository variable `PUBLIC_URL` set, the deploy job polls `/__build-id` for five minutes after the webhook.

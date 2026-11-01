@@ -7,9 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { createCsbFileSource } from '../../src/server/content/csb-files.ts';
+import { sha256Hex } from '../../src/server/platform/secrets.ts';
 import { importText } from '../../src/server/content/import.ts';
 import type { Harness } from '../support/harness.ts';
-import { signIn, startHarness, truncateAll } from '../support/harness.ts';
+import { ownerEmail, signIn, startHarness, truncateAll } from '../support/harness.ts';
 
 // A local stand-in for API.Bible. It answers with synthetic text only: no CSB text is kept in this repository, and S13.3
 // against the real service needs the owner's key and approved CSB access.
@@ -20,6 +21,7 @@ const day = 24 * 60 * 60 * 1000;
 
 let mode: 'ok' | 'missing-key' | 'bad-key' | 'down' | 'limited' | 'no-chapter' = 'ok';
 let served = 0;
+let beforeChapterReply: (() => Promise<void>) | null = null;
 const requests: string[] = [];
 let api: Server;
 let h: Harness;
@@ -63,9 +65,10 @@ function answer(url: URL, headers: Record<string, string | string[] | undefined>
 }
 
 before(async () => {
-  api = createServer((request, response) => {
+  api = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://fixture');
     requests.push(url.pathname + url.search);
+    if (url.pathname.includes('/chapters/')) await beforeChapterReply?.();
     const [status, body] = answer(url, request.headers);
     response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
   });
@@ -88,6 +91,7 @@ beforeEach(async () => {
   // A day apart, so the availability one test cached has expired by the next.
   h.clock.advance(day);
   mode = 'ok';
+  beforeChapterReply = null;
   requests.length = 0;
   cookie = (await signIn(h, 'reader@example.test')).cookie;
 });
@@ -210,6 +214,27 @@ describe('CSB from API.Bible (S13)', () => {
     assert.equal(new Set(answers.map((a) => a.json().fums.token)).size, 1);
   });
 
+
+  test('an import winning an in-flight API.Bible fetch cannot leak through the shared load', async () => {
+    const ownerCookie = (await signIn(h, ownerEmail)).cookie;
+    const content = JSON.stringify({ verses: [{ number: 1, text: 'Imported during fetch.' }], headings: [], footnotes: [] });
+    beforeChapterReply = async () => {
+      beforeChapterReply = null;
+      await h.db.query(`INSERT INTO chapters (translation_id, book_id, chapter, verse_count, content, content_sha256, source_ref, fetched_at)
+        VALUES ('CSB', 'ROM', 1, 1, $1, $2, 'synthetic-import', $3)`, [content, sha256Hex(content), h.clock.now()]);
+    };
+    const [denied, allowed] = await Promise.all([
+      get('/api/content/CSB/ROM/1'),
+      h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: ownerCookie } }),
+    ]);
+    assert.equal(denied.statusCode, 403);
+    assert.doesNotMatch(denied.body, /Imported during fetch/);
+    assert.equal(allowed.statusCode, 200);
+    assert.equal(allowed.json().verses[0].text, 'Imported during fetch.');
+    assert.equal(allowed.json().expiresAt, null);
+    assert.equal(chapterCalls(), 1);
+  });
+
   test("importing the owner's CSB files replaces an API.Bible copy with one that never expires", async () => {
     const cachedCopy = (await get('/api/content/CSB/ROM/1')).json();
     assert.notEqual(cachedCopy.expiresAt, null);
@@ -227,9 +252,19 @@ describe('CSB from API.Bible (S13)', () => {
       await rm(dir, { recursive: true, force: true });
     }
 
+    const readerCookie = cookie;
+    cookie = (await signIn(h, ownerEmail)).cookie;
     h.clock.advance(30 * day);
     mode = 'down';
-    const imported = await get('/api/content/CSB/ROM/1');
+    const [imported, denied] = await Promise.all([
+      get('/api/content/CSB/ROM/1'),
+      h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: readerCookie } }),
+    ]);
+    assert.equal(denied.statusCode, 403);
+    assert.doesNotMatch(denied.body, /Imported fixture/);
+    const manifest = await h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1/download-manifest', cookies: { bs_session: readerCookie } });
+    assert.equal(manifest.statusCode, 403);
+    assert.doesNotMatch(manifest.body, /assets|sha256/);
     assert.equal(imported.statusCode, 200);
     assert.equal(imported.json().expiresAt, null);
     assert.equal(imported.json().fums, undefined);

@@ -13,6 +13,7 @@ import type {
   TranslationView,
   Uuid,
 } from '../shared/api.ts';
+import { offlineContentPermitted } from './content-access.ts';
 import { ApiFailure } from './api.ts';
 
 export type DownloadState =
@@ -252,6 +253,8 @@ export async function downloadChapter(
       ) {
         throw new Error('The download manifest is incomplete; try again.');
       }
+      if (!offlineContentPermitted(userId, ref.translationId, manifest))
+        throw new Error('This imported CSB download is not authorized for this account.');
       // Text without an expiry is imported (BSB, and CSB from the owner's files) and is kept.
       if (
         manifest.expiresAt !== null &&
@@ -319,7 +322,9 @@ export async function downloadChapter(
         chapter.translationId !== ref.translationId ||
         chapter.bookId !== ref.bookId ||
         chapter.chapter !== ref.chapter ||
-        chapter.expiresAt !== manifest.expiresAt
+        chapter.expiresAt !== manifest.expiresAt ||
+        chapter.restrictedToUserId !== manifest.restrictedToUserId ||
+        !offlineContentPermitted(userId, ref.translationId, chapter)
       ) {
         throw new Error('The chapter changed while downloading; try again.');
       }
@@ -387,6 +392,16 @@ export function removeDownload(userId: Uuid, ref: ChapterRef): Promise<void> {
 }
 
 async function evicted(record: DownloadRecord): Promise<boolean> {
+  if (record.translationId === 'CSB' && record.expiresAt === null) {
+    let permitted = false;
+    try {
+      permitted = offlineContentPermitted(record.userId, record.translationId, JSON.parse(record.chapterBody) as ChapterView);
+    } catch { /* An old or malformed copy is never shown. */ }
+    if (!permitted) {
+      await removeDownload(record.userId, record);
+      return true;
+    }
+  }
   if (record.chapterAsset) {
     const bytes = new TextEncoder().encode(record.chapterBody);
     if (
@@ -459,7 +474,8 @@ export async function downloadedTranslations(userId: Uuid): Promise<TranslationV
   if (!storageAvailable()) return [];
   const translations = new Map<TranslationId, TranslationView>();
   for (const record of await allRecords(userId))
-    if (record.translation) translations.set(record.translationId, record.translation);
+    if ((record.translationId !== 'CSB' || record.expiresAt !== null || !await evicted(record)) && record.translation)
+      translations.set(record.translationId, record.translation);
   return [...translations.values()];
 }
 

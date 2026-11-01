@@ -700,3 +700,24 @@ describe('what reaches the browser (S6.8)', () => {
     }
   });
 });
+
+
+test('assistant permission does not grant imported CSB access to a different account', async () => {
+  const email = 'assistant-only@example.test';
+  const original = h.config.assistantOwnerEmail;
+  h.config.assistantOwnerEmail = email;
+  try {
+    const { cookie } = await signIn(h, email);
+    const id = await conversation(cookie);
+    const linked = await link(new FakeRuntime(), cookie);
+    await h.db.query(`INSERT INTO chapters (translation_id, book_id, chapter, verse_count, content, content_sha256, source_ref, fetched_at)
+      SELECT 'CSB', book_id, chapter, verse_count, content, content_sha256, 'synthetic-import', fetched_at FROM chapters WHERE translation_id = 'BSB'`);
+    const response = await api('POST', cookie, `/api/assistant/conversations/${id}/turns`, {
+      clientTurnId: randomUUID(), prompt: 'Explain this passage', context: { ...romans(1, 1), translationId: 'CSB' },
+    });
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.json().error, 'content_not_permitted');
+    assert.equal((await h.db.query('SELECT 1 FROM assistant_turns')).rowCount, 0);
+    assert.equal(linked.received.filter((m) => m.t === 'dispatch').length, 0);
+  } finally { h.config.assistantOwnerEmail = original; }
+});
