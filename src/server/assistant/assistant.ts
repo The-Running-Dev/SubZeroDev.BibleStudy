@@ -13,6 +13,7 @@ import type {
 import { terminalTurnStatuses } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { formatReference, maxVerse } from '../../shared/reference.ts';
+import { contentAccess } from '../content/access.ts';
 import { getChapter, parseTranslationId } from '../content/catalog.ts';
 import type { Csb } from '../content/catalog.ts';
 import { ownNotes } from '../personal/personal.ts';
@@ -522,7 +523,7 @@ export function createAssistant(deps: AssistantDeps): Assistant {
       if (!online()) throw offline();
 
       if (!bookById(input.ref.bookId)) throw invalid(`${input.ref.bookId} is not a book.`);
-      const chapter = JSON.parse((await getChapter(db, input.translationId, input.ref.bookId, input.ref.chapter, csb)).body) as ChapterView;
+      const chapter = JSON.parse((await getChapter(db, input.translationId, input.ref.bookId, input.ref.chapter, csb, await contentAccess(db, config, userId))).body) as ChapterView;
       const end = input.ref.endVerse ?? input.ref.startVerse;
       if (end !== null && end > chapter.verseCount) throw invalid(`${formatReference({ ...input.ref, startVerse: null, endVerse: null })} has ${chapter.verseCount} verses.`);
       const verses = chapter.verses

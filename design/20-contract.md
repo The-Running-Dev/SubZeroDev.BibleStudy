@@ -28,7 +28,7 @@ Each invariant names the module that maintains it.
 
 ### content
 - **I-10** A Chapter's `contentSha256` is the SHA-256 of its stored `content`, and the API serves that content unchanged.
-- **I-11** A CSB Chapter cached from API.Bible is never served when `now ≥ expiresAt`. CSB text comes only from the owner's imported CSB files (`expiresAt` null, never overwritten by an API fetch) or the configured licensed API.
+- **I-11** A CSB Chapter cached from API.Bible is never served when `now ≥ expiresAt`. Imported CSB is readable only by the verified `OWNER_EMAIL` account under `CSB_IMPORTED_ACCESS=owner`; unset owner or `disabled` denies everyone. Group membership grants nothing. The account boundary applies to catalogs, chapter retrieval, download manifests, offline copies and assistant loading. CSB text comes only from the owner's imported CSB files (`expiresAt` null, never overwritten by an API fetch) or the configured licensed API.
 - **I-12** A Recording is only served for the translation in its `translationId`. The media bytes served hash to `mediaSha256`.
 - **I-13** Recording `timing` is used for verse following only when `timingStatus = 'verified'`.
   - `verified` means exactly `verseCount` strictly increasing values, all `< durationSeconds`.
@@ -192,7 +192,7 @@ function runMailWorker(signal: AbortSignal): Promise<void>;
 interface TranslationView { id: TranslationId; name: string; copyrightNotice: string; availability: Availability; narration: Availability; }
 interface ChapterView { translationId: TranslationId; bookId: BookId; chapter: number; verseCount: number; contentSha256: string;
   verses: { number: number; text: string }[]; headings: { beforeVerse: number; text: string }[]; footnotes: { verse: number; text: string }[];
-  expiresAt: IsoInstant | null; fums?: { token: string } }
+  expiresAt: IsoInstant | null; restrictedToUserId?: Uuid; fums?: { token: string } }
 interface RecordingView { id: Uuid; narratorId: string; narratorName: string; license: string; mediaUrl: string; mediaSha256: string; bytes: number;
   durationSeconds: number; timing: { status: 'verified'; verseStarts: number[] } | { status: 'absent' | 'rejected'; reason: string }; }
 
@@ -207,7 +207,7 @@ function getChapter(translationId: TranslationId, bookId: BookId, chapter: numbe
 function listRecordings(translationId: TranslationId, bookId: BookId, chapter: number): Promise<{ recordings: RecordingView[]; preparing: string[]; failed: { narratorId: string; reason: string }[] }>;
 // GET /media/:sha256 — byte ranges, immutable cache headers
 // GET /api/content/:translation/:book/:chapter/download-manifest[?narration=true] — no-store; asset urls are the chapter route and /media/:sha256
-function downloadManifest(translationId: TranslationId, bookId: BookId, chapter: number, withNarration: boolean): Promise<{ assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[]; totalBytes: number; expiresAt: IsoInstant | null }>;
+function downloadManifest(translationId: TranslationId, bookId: BookId, chapter: number, withNarration: boolean): Promise<{ assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[]; totalBytes: number; expiresAt: IsoInstant | null; restrictedToUserId?: Uuid }>;
 
 // pure
 function parseReference(input: string): PassageRef | null;   // 'Romans 3:12', 'rom 3', 'Romans 3:12-15'
@@ -449,6 +449,7 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 
 **content**
 - `narration_unavailable` (409): a download with narration asked for a chapter with no recording ready. Retry: yes while the narration is preparing, otherwise no. Offer text only.
+- `content_not_permitted` (403): imported CSB is outside the caller's permitted account scope. No text, hashes or manifest assets are returned. Retry: no.
 - `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. This includes a CSB chapter API.Bible could not supply (S13.4). Retry: no. Show the reason.
 - `chapter_not_found` (404): no such book or chapter. Retry: no.
 - `not_found` (404): a `/media/` request for a recording that is missing or not ready. Retry: no.

@@ -311,3 +311,17 @@ Acceptance:
   - S18.4 The demo preparation uses synthetic accounts only and sends no real invitations or reminders.
   - Checked: S18.1 by following the README in a clean clone on 31 October 2026 against an empty database (migrations, BSB text, Romans 1 narration, `npm run demo:seed`, sign-in as a demo member through Mailpit, the shared socket). It found two setup defects, now fixed: the example `CONNECTOR_TOKEN` placeholder stopped the server, and the dev client's `/api` proxy also caught `/api.ts`, leaving a blank page; `/media/` and `/ws` were not proxied. S18.2 in `tests/unit/env-example.test.ts`, S18.3 in `docs/handover.md`, S18.4 in `tests/integration/demo.test.ts`.
 Out of scope: new features.
+
+
+## S19 — Contain imported CSB distribution
+Status: implemented; full CI validation pending
+Delivers: A reversible owner-only default for imported CSB, independent of group membership and licensing approval.
+Touches: content access/catalog, web/assistant loading, manifests, offline records, configuration, documentation
+Depends on: S13, S14, S18, PR #24
+Acceptance:
+  - S19.1 Signed-out requests return 401; signed-in solo accounts and ordinary members cannot retrieve imported CSB or its manifests, including encoded, HEAD and conditional requests.
+  - S19.2 Only the verified OWNER_EMAIL account can read/download imports; no owner or disabled imports refuses everyone. Membership is not required for owner solo reading.
+  - S19.3 Imported book availability is account-specific; BSB solo reading/downloads and expiring API.Bible content retain their behavior.
+  - S19.4 New imported offline copies are scoped to the authorized account; old unscoped copies are purged by the updated client. Assistant permission alone grants no imported access.
+  - S19.5 Technical containment, owner licensing confirmation and observed deployment state are reported separately. See ADR-0003.
+Out of scope: enabling group distribution, declaring licence permission, recalling exported files, deploying without the established merge workflow.

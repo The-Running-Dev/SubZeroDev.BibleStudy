@@ -9,6 +9,8 @@ export interface Config {
   publicUrl: string;
   // Lower-cased; the first sign-in by this address creates the group with that user as owner.
   ownerEmail: string | null;
+  // No group sharing mode until the permitted audience is established.
+  csbImportedAccess: 'owner' | 'disabled';
   host: string;
   port: number;
   cookieSecure: boolean;
@@ -63,6 +65,7 @@ export function loadConfig(env: Env = process.env): Config {
     mailFrom: env.MAIL_FROM?.trim() || 'Bible Study <no-reply@localhost>',
     publicUrl: (env.PUBLIC_URL?.trim() || 'http://localhost:3000').replace(/\/+$/, ''),
     ownerEmail: env.OWNER_EMAIL?.trim().toLowerCase() || null,
+    csbImportedAccess: (env.CSB_IMPORTED_ACCESS?.trim() || 'owner') as Config['csbImportedAccess'],
     host: env.HOST?.trim() || '0.0.0.0',
     port: Number(env.PORT ?? 3000),
     cookieSecure: env.COOKIE_SECURE !== 'false',
@@ -74,6 +77,8 @@ export function loadConfig(env: Env = process.env): Config {
     connectorToken: env.CONNECTOR_TOKEN?.trim() || null,
     apibible: null,
   };
+
+  if (!['owner', 'disabled'].includes(config.csbImportedAccess)) problems.push('CSB_IMPORTED_ACCESS must be owner or disabled');
 
   const apibibleKey = env.APIBIBLE_KEY?.trim();
   if (apibibleKey) {

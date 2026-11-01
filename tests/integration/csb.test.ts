@@ -9,7 +9,7 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import { createCsbFileSource } from '../../src/server/content/csb-files.ts';
 import { importText } from '../../src/server/content/import.ts';
 import type { Harness } from '../support/harness.ts';
-import { signIn, startHarness, truncateAll } from '../support/harness.ts';
+import { ownerEmail, signIn, startHarness, truncateAll } from '../support/harness.ts';
 
 // A local stand-in for API.Bible. It answers with synthetic text only: no CSB text is kept in this repository, and S13.3
 // against the real service needs the owner's key and approved CSB access.
@@ -227,9 +227,19 @@ describe('CSB from API.Bible (S13)', () => {
       await rm(dir, { recursive: true, force: true });
     }
 
+    const readerCookie = cookie;
+    cookie = (await signIn(h, ownerEmail)).cookie;
     h.clock.advance(30 * day);
     mode = 'down';
-    const imported = await get('/api/content/CSB/ROM/1');
+    const [imported, denied] = await Promise.all([
+      get('/api/content/CSB/ROM/1'),
+      h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: readerCookie } }),
+    ]);
+    assert.equal(denied.statusCode, 403);
+    assert.doesNotMatch(denied.body, /Imported fixture/);
+    const manifest = await h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1/download-manifest', cookies: { bs_session: readerCookie } });
+    assert.equal(manifest.statusCode, 403);
+    assert.doesNotMatch(manifest.body, /assets|sha256/);
     assert.equal(imported.statusCode, 200);
     assert.equal(imported.json().expiresAt, null);
     assert.equal(imported.json().fums, undefined);

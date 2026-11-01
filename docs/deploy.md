@@ -34,7 +34,7 @@ These are account and server settings, so they are the owner's to make. Nothing 
    ```bash
    docker exec "$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)" node src/server/content/import-cli.ts --translation BSB
    ```
-7. **Import CSB** from the owner's files, if you hold them. They are licensed text, so they are never in git or the image. Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
+7. **Check the permitted CSB audience before importing.** Set `OWNER_EMAIL` and keep `CSB_IMPORTED_ACCESS=owner` (default) for containment, or `disabled` to refuse imported text to everyone. No group sharing is enabled. Confirm the actual licence covers the intended hosted/offline uses; holding XML is not evidence of that permission. See [ADR-0003](decisions/0003-imported-csb-access.md). **Import CSB** from the owner's files, if you hold them. They are licensed text, so they are never in git or the image. Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
 
    ```bash
    app="$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)"
@@ -43,7 +43,7 @@ These are account and server settings, so they are the owner's to make. Nothing 
    docker exec -u 0 "$app" rm -rf /tmp/CSB && rm -rf /tmp/CSB
    ```
 
-   The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed. CSB is copyrighted: serving it on a public site, even behind sign-in, needs the owner's licence (D-2026-11-01 in [the decision log](../design/90-decisions.md)).
+   Only the configured owner can read/download imported text under the default policy. New offline imports are account-scoped; old unscoped downloads are discarded when inspected by an updated client. Already copied files and disconnected authorized copies cannot be recalled. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed. CSB is copyrighted: serving it on a public site, even behind sign-in, needs the owner's licence (D-2026-11-01 in [the decision log](../design/90-decisions.md)).
 
 ## Environment variables
 

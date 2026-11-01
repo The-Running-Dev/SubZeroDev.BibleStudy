@@ -2,6 +2,8 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { getChapter, listBooks, listTranslations, parseTranslationId } from '../content/catalog.ts';
+import { contentAccess } from '../content/access.ts';
+import { requireAuth } from './auth.ts';
 import { downloadManifest } from '../content/downloads.ts';
 import { mediaPath, sha256Pattern } from '../content/media-store.ts';
 import { findMedia, listRecordings } from '../content/narration.ts';
@@ -29,19 +31,24 @@ export function parseRange(header: string | undefined, size: number): { start: n
 const missingMedia = (reason: string) => new AppError('not_found', 404, `Narration unavailable for this chapter: ${reason}`);
 
 export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void {
-  app.get('/api/content/translations', async () => listTranslations(deps.db, deps.csb ?? null));
+  app.get('/api/content/translations', async (request, reply) => {
+    reply.header('cache-control', 'private, no-store');
+    return listTranslations(deps.db, deps.csb ?? null, await contentAccess(deps.db, deps.config, requireAuth(request).userId));
+  });
 
-  app.get('/api/content/books', async (request) => {
+  app.get('/api/content/books', async (request, reply) => {
+    reply.header('cache-control', 'private, no-store');
     const query = request.query as Record<string, unknown>;
-    return listBooks(deps.db, parseTranslationId(query.translation), deps.csb ?? null);
+    return listBooks(deps.db, parseTranslationId(query.translation), deps.csb ?? null, await contentAccess(deps.db, deps.config, requireAuth(request).userId));
   });
 
   app.get('/api/content/:translation/:book/:chapter', async (request, reply) => {
     const params = request.params as { translation: string; book: string; chapter: string };
     const chapter = /^\d{1,3}$/.test(params.chapter) ? Number(params.chapter) : NaN;
-    const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter, deps.csb ?? null);
+    reply.header('cache-control', 'private, no-store');
+    const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter, deps.csb ?? null, await contentAccess(deps.db, deps.config, requireAuth(request).userId));
     const etag = stored.etag;
-    reply.header('etag', etag).header('cache-control', stored.expiresAt ? 'private, no-store' : 'private, no-cache');
+    reply.header('etag', etag).header('cache-control', params.translation === 'CSB' ? 'private, no-store' : 'private, no-cache');
     if (request.headers['if-none-match'] === etag) return reply.status(304).send();
     return reply.type('application/json; charset=utf-8').send(stored.body);
   });
@@ -51,8 +58,9 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
     const params = request.params as { translation: string; book: string; chapter: string };
     const chapter = /^\d{1,3}$/.test(params.chapter) ? Number(params.chapter) : NaN;
     const query = request.query as Record<string, unknown>;
+    reply.header('cache-control', 'private, no-store');
     const { queued, ...manifest } = await downloadManifest(
-      { db: deps.db, clock: deps.clock, mediaDir: deps.config.mediaDir, csb: deps.csb ?? null },
+      { db: deps.db, clock: deps.clock, mediaDir: deps.config.mediaDir, csb: deps.csb ?? null, access: await contentAccess(deps.db, deps.config, requireAuth(request).userId) },
       parseTranslationId(params.translation),
       params.book.toUpperCase(),
       chapter,
