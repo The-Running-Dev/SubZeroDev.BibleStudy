@@ -314,7 +314,7 @@ Out of scope: new features.
 
 
 ## S19 — Contain imported CSB distribution
-Status: implemented; full CI validation pending
+Status: implemented; validation results recorded in the pull request
 Delivers: A reversible owner-only default for imported CSB, independent of group membership and licensing approval.
 Touches: content access/catalog, web/assistant loading, manifests, offline records, configuration, documentation
 Depends on: S13, S14, S18, PR #24

@@ -506,6 +506,7 @@ describe('S14 download integrity and offline browser regressions', () => {
   });
 
   test("CSB without an expiration (imported from the owner's files) is kept offline", async () => {
+    restrictedToUserId = userId;
     const context = await browser.newContext(mobile);
     try {
       expiresAt = null;
