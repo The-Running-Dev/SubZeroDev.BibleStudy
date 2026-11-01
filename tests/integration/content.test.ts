@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { createAoLabSource } from '../../src/server/content/aolab.ts';
 import type { AoBook, AoChapter, AoContentItem, ContentSource } from '../../src/server/content/aolab.ts';
-import { runImport } from '../../src/server/content/import.ts';
+import { createCsbFileSource } from '../../src/server/content/csb-files.ts';
+import { importText, runImport } from '../../src/server/content/import.ts';
 import { sha256Hex } from '../../src/server/platform/secrets.ts';
 import type { Harness } from '../support/harness.ts';
 import { clearMailbox, signIn, startHarness, truncateAll } from '../support/harness.ts';
@@ -300,13 +304,13 @@ describe('Romans imported live from AO Lab', () => {
       translations.map((t: { id: string; availability: unknown }) => [t.id, t.availability]),
       [
         ['BSB', { state: 'available' }],
-        ['CSB', { state: 'not_configured', reason: "CSB needs the owner's API.Bible key (APIBIBLE_KEY)." }],
+        ['CSB', { state: 'not_configured', reason: "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY)." }],
       ],
     );
     const csb = await get('/api/content/CSB/ROM/1');
     assert.equal(csb.statusCode, 409);
     assert.equal(csb.json().error, 'translation_unavailable');
-    assert.equal(csb.json().message, "CSB needs the owner's API.Bible key (APIBIBLE_KEY).");
+    assert.equal(csb.json().message, "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY).");
     assert.equal((await get('/api/content/books?translation=CSB')).statusCode, 409);
   });
 
@@ -328,5 +332,56 @@ describe('Romans imported live from AO Lab', () => {
     for (const url of ['/api/content/translations', '/api/content/books?translation=BSB', '/api/content/BSB/ROM/1']) {
       assert.equal((await h.app.inject({ method: 'GET', url })).statusCode, 401, url);
     }
+  });
+});
+
+describe("CSB imported from the owner's files", () => {
+  // Synthetic markup in the files' shape; no CSB text is kept in this repository.
+  const philemon = `<book id="bk.57"><bookname>Philemon</bookname><chapter id="philemon.1" display="1">
+<head1>A Fixture Heading</head1>
+<p><verse reference="philemon.1.1" display-number="1"><sup class="verse-ref" id="philemon.1.1">1</sup>Fixture verse one.</verse>
+<verse reference="philemon.1.2" display-number="2"><sup class="verse-ref" id="philemon.1.2">2</sup>Fixture verse two.</verse></p>
+</chapter></book>`;
+  let dir: string;
+  const importCsb = () => importText({ db: h.db, clock: h.clock, text: createCsbFileSource(dir) }, { translationId: 'CSB', books: ['PHM'] });
+
+  before(async () => {
+    await freshMember();
+    dir = await mkdtemp(join(tmpdir(), 'csb-import-'));
+    await writeFile(join(dir, '57-Phm.xml'), philemon);
+  });
+  after(async () => {
+    await rm(dir, { recursive: true, force: true });
+    await h.db.query(`DELETE FROM chapters WHERE translation_id = 'CSB'`);
+    await h.db.query(`DELETE FROM books WHERE translation_id = 'CSB'`);
+  });
+
+  test('an imported CSB chapter is served without API.Bible and never expires', async () => {
+    const summary = await importCsb();
+    assert.equal(summary.status, 'succeeded');
+    assert.deepEqual(summary.counts, { inserted: 1, updated: 0, unchanged: 0, failed: 0 });
+
+    const csb = (await get('/api/content/translations')).json().find((t: { id: string }) => t.id === 'CSB');
+    assert.deepEqual(csb.availability, { state: 'available' });
+    assert.deepEqual((await get('/api/content/books?translation=CSB')).json(), [{ bookId: 'PHM', name: 'Philemon', chapters: 1 }]);
+
+    h.clock.set('2026-11-21T12:00:00Z'); // past an API.Bible copy's 14 days
+    const chapter = await get('/api/content/CSB/PHM/1');
+    assert.equal(chapter.statusCode, 200);
+    const view = chapter.json();
+    assert.equal(view.expiresAt, null);
+    assert.deepEqual(view.verses, [
+      { number: 1, text: 'Fixture verse one.' },
+      { number: 2, text: 'Fixture verse two.' },
+    ]);
+    assert.deepEqual(view.headings, [{ beforeVerse: 1, text: 'A Fixture Heading' }]);
+
+    const missing = await get('/api/content/CSB/ROM/1');
+    assert.equal(missing.statusCode, 409);
+    assert.equal(missing.json().message, 'This CSB chapter has not been imported.');
+  });
+
+  test('importing the same files again changes nothing', async () => {
+    assert.deepEqual((await importCsb()).counts, { inserted: 0, updated: 0, unchanged: 1, failed: 0 });
   });
 });

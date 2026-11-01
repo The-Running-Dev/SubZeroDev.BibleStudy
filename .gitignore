@@ -48,3 +48,6 @@ out/
 
 # Recordings stored by a local run (MEDIA_DIR)
 data/
+
+# The owner's licensed CSB files: never committed, never in the image.
+/bibles/

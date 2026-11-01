@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
+import { createCsbFileSource } from '../../src/server/content/csb-files.ts';
+import { importText } from '../../src/server/content/import.ts';
 import type { Harness } from '../support/harness.ts';
 import { signIn, startHarness, truncateAll } from '../support/harness.ts';
 
@@ -203,6 +208,33 @@ describe('CSB from API.Bible (S13)', () => {
     assert.deepEqual(answers.map((a) => a.statusCode), [200, 200, 200]);
     assert.equal(chapterCalls(), 1);
     assert.equal(new Set(answers.map((a) => a.json().fums.token)).size, 1);
+  });
+
+  test("importing the owner's CSB files replaces an API.Bible copy with one that never expires", async () => {
+    const cachedCopy = (await get('/api/content/CSB/ROM/1')).json();
+    assert.notEqual(cachedCopy.expiresAt, null);
+
+    const dir = await mkdtemp(join(tmpdir(), 'csb-import-'));
+    try {
+      // Synthetic markup in the files' shape. Only chapter 1 is in it, so the other fifteen fail.
+      await writeFile(
+        join(dir, '45-Rom.xml'),
+        `<book id="bk.45"><chapter id="romans.1" display="1"><p><verse reference="romans.1.1" display-number="1"><sup class="verse-ref" id="romans.1.1">1</sup>Imported fixture verse.</verse></p></chapter></book>`,
+      );
+      const summary = await importText({ db: h.db, clock: h.clock, text: createCsbFileSource(dir) }, { translationId: 'CSB', books: ['ROM'] });
+      assert.deepEqual(summary.counts, { inserted: 0, updated: 1, unchanged: 0, failed: 15 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    h.clock.advance(30 * day);
+    mode = 'down';
+    const imported = await get('/api/content/CSB/ROM/1');
+    assert.equal(imported.statusCode, 200);
+    assert.equal(imported.json().expiresAt, null);
+    assert.equal(imported.json().fums, undefined);
+    assert.deepEqual(imported.json().verses, [{ number: 1, text: 'Imported fixture verse.' }]);
+    assert.equal(chapterCalls(), 1);
   });
 
   test('S13.5 CSB narration is unavailable: no licensed CSB recording', async () => {

@@ -51,7 +51,7 @@ Each run records the source edition, every chapter's SHA-256 and every recording
 | DOD-09 One shared narration | Automated on one machine; across networks not performed | S5.4–S5.5: pause reaches others in 30 ms, drift p95 36.8 ms. Clients on different networks need the deployed app and the owner's phones. |
 | DOD-10 Verse highlight and ranges | Automated | S3.2, S3.4–S3.6: timing verified at import, never invented. |
 | DOD-11 Late join, loss and restart | Automated; voice part out of v1 | S5.6–S5.8. |
-| DOD-12 BSB and CSB | Automated without a key; CSB with a key not performed | S2.7, S3.8, S12.4, S13.1, S13.2, S13.4–S13.6. S13.3 (CSB text from API.Bible) needs the owner's free key with CSB access. |
+| DOD-12 BSB and CSB | Automated; CSB from the owner's files imported for real; CSB with an API.Bible key not performed | S2.7, S3.8, S12.4, S13.1, S13.2, S13.4–S13.6, and the import of the owner's CSB files (synthetic fixtures in CI). S13.3 (CSB text from API.Bible) needs the owner's free key with CSB access. |
 | DOD-13 Navigation | Automated | S2.4–S2.6; Romans 2–3 and the Romans 16 → 1 Corinthians 1 step. |
 | DOD-14 Source integrity | Automated | S2.2, S3.3; `import_manifests` above. |
 | DOD-15 Questions during the week | Automated | S8.1, S8.2. |
@@ -79,7 +79,7 @@ Each needs something only the owner can provide. Nothing here was replaced by a 
 |---|---|
 | S1.11 a code reaching a real inbox; real reminder delivery | `SMTP_URL` for a free relay (Gmail app password, or the VPS's own mail server) |
 | S7.5 the app at the owner's hostname | the DNS record, proxy route, GHCR access and deploy webhook secret (`docs/deploy.md`) |
-| S13.3 CSB text | a free API.Bible Starter key with CSB access approved |
+| S13.3 CSB text from API.Bible | a free API.Bible Starter key with CSB access approved; not needed for chapters imported from the owner's files |
 | S14.7, S17.4 real phones | an iPhone with Safari and an Android phone with Chrome |
 | DOD-09 across two networks | the deployed app and two phones off the owner's network |
 
@@ -87,7 +87,8 @@ Each needs something only the owner can provide. Nothing here was replaced by a 
 
 - No built-in voice (DOD-08); the group uses its own call.
 - CSB has no narration: no licensed CSB recording exists. A CSB study runs as reading together, with any member marking the verse.
-- CSB text is held for 14 days, as API.Bible's terms allow, and refetched after that only with a connection.
+- CSB text imported from the owner's files never expires. CSB fetched from API.Bible is held for 14 days, as its terms allow, and refetched after that only with a connection.
+- The owner's CSB files leave out the 16 New Testament verses that modern texts omit (for example Matthew 17:21); the reader shows those chapters without them.
 - One group per instance. The data model is keyed by group, so a second group needs no migration, but there is no UI for it.
 - The study assistant is the owner's alone and needs their PC on with the connector running.
 - Codes and reminders go only through the relay in `SMTP_URL`; until a real one is set, they reach no one outside Mailpit.
