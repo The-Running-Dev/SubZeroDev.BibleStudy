@@ -115,7 +115,7 @@ test('S19/S20 shared scripture does not grant operational or assistant access, e
   const privateRecipient = 'private-operations@example.test';
   const jobId = randomUUID();
   await h.db.query(`INSERT INTO email_jobs (id, kind, idempotency_key, to_address, subject, text_body, html_body, status, attempts, next_attempt_at, created_at, last_error)
-    VALUES ($1, 'reminder', $1::text, $2, 'Private', 'Private', '<p>Private</p>', 'failed', 1, $3, $3, '550 private error')`,
+    VALUES ($1::uuid, 'reminder', $1::text, $2, 'Private', 'Private', '<p>Private</p>', 'failed', 1, $3, $3, '550 private error')`,
     [jobId, privateRecipient, h.clock.now()]);
   assert.equal((await get('/api/owner/status')).statusCode, 401);
   const ownerConfig = h.config.ownerEmail;
