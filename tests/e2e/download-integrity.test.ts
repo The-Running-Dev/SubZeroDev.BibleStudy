@@ -589,10 +589,11 @@ describe('S14 download integrity and offline browser regressions', () => {
 });
 
 
-describe('imported CSB offline account boundary', () => {
-  test('a missing or other-account manifest scope cannot create a ready download', async () => {
-    expiresAt = null;
-    for (const scope of [undefined, 'some-other-account']) {
+describe('shared imported CSB offline reading', () => {
+  for (const scope of [undefined, userId, 'some-other-account']) {
+    test(`an imported download remains readable offline with ${scope === undefined ? 'no account restriction' : 'legacy scope ' + scope}`, async () => {
+      expiresAt = null;
+      // New responses have no scope; old response bodies may still contain one. Neither restricts shared text.
       restrictedToUserId = scope;
       const context = await browser.newContext(mobile);
       try {
@@ -600,55 +601,15 @@ describe('imported CSB offline account boundary', () => {
         await page.getByLabel('Translation').selectOption('CSB');
         await page.locator('.verse').first().waitFor();
         await start(page, false);
-        await page.getByText(/Download failed — This imported CSB download is not authorized/).waitFor();
-        assert.deepEqual((await stored(page)).downloads, []);
-      } finally { await context.close(); }
-    }
-  });
-
-  for (const legacy of [false, true]) {
-    test(legacy ? 'old unscoped imported copies are purged before offline display' : 'a scoped owner download remains readable offline', async () => {
-      expiresAt = null;
-      restrictedToUserId = userId;
-      const context = await browser.newContext(mobile);
-      try {
-        const page = await open(context);
-        await page.getByLabel('Translation').selectOption('CSB');
-        await page.locator('.verse').first().waitFor();
-        await start(page, false);
         await page.getByText('Downloaded — readable offline.').waitFor();
-        if (legacy) await page.evaluate(async () => {
-          const db = await new Promise<IDBDatabase>((resolve) => {
-            const req = indexedDB.open('biblestudy', 1);
-            req.onsuccess = () => resolve(req.result);
-          });
-          const records = await new Promise<{ chapterBody: string; chapterAsset?: unknown }[]>((resolve) => {
-            const req = db.transaction('downloads').objectStore('downloads').getAll();
-            req.onsuccess = () => resolve(req.result);
-          });
-          const tx = db.transaction('downloads', 'readwrite');
-          for (const record of records) {
-            const body = JSON.parse(record.chapterBody);
-            delete body.restrictedToUserId;
-            // Old builds had no account scope, and older records may lack an asset digest too.
-            tx.objectStore('downloads').put({ ...record, chapterBody: JSON.stringify(body), chapterAsset: undefined });
-          }
-          await new Promise<void>((resolve) => { tx.oncomplete = () => resolve(); });
-          db.close();
-        });
-        // Refuse API requests while leaving the shell available: this exercises offline fallback deterministically.
+        assert.equal((await stored(page)).downloads.length, 1);
         await context.route('**/api/**', (route) => route.abort('internetdisconnected'));
         await page.getByLabel('Chapter', { exact: true }).selectOption('2');
         await page.getByText('Not downloaded — needs a connection.').waitFor();
         await page.getByLabel('Chapter', { exact: true }).selectOption('1');
-        if (legacy) {
-          await page.getByText('Not downloaded — needs a connection.').waitFor();
-          assert.equal(await page.locator('.verse').count(), 0);
-          assert.deepEqual((await stored(page)).downloads, []);
-        } else {
-          await page.getByText('Reading the copy downloaded to this device.').waitFor();
-          assert.equal(await page.locator('.verse').count(), 3);
-        }
+        await page.getByText('Reading the copy downloaded to this device.').waitFor();
+        assert.equal(await page.locator('.verse').count(), 3);
+        assert.equal((await stored(page)).downloads.length, 1);
       } finally { await context.close(); }
     });
   }

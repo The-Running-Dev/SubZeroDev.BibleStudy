@@ -215,7 +215,7 @@ describe('CSB from API.Bible (S13)', () => {
   });
 
 
-  test('an import winning an in-flight API.Bible fetch cannot leak through the shared load', async () => {
+  test('an import winning an in-flight API.Bible fetch is shared by all accounts', async () => {
     const ownerCookie = (await signIn(h, ownerEmail)).cookie;
     const content = JSON.stringify({ verses: [{ number: 1, text: 'Imported during fetch.' }], headings: [], footnotes: [] });
     beforeChapterReply = async () => {
@@ -223,12 +223,12 @@ describe('CSB from API.Bible (S13)', () => {
       await h.db.query(`INSERT INTO chapters (translation_id, book_id, chapter, verse_count, content, content_sha256, source_ref, fetched_at)
         VALUES ('CSB', 'ROM', 1, 1, $1, $2, 'synthetic-import', $3)`, [content, sha256Hex(content), h.clock.now()]);
     };
-    const [denied, allowed] = await Promise.all([
+    const [reader, allowed] = await Promise.all([
       get('/api/content/CSB/ROM/1'),
       h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: ownerCookie } }),
     ]);
-    assert.equal(denied.statusCode, 403);
-    assert.doesNotMatch(denied.body, /Imported during fetch/);
+    assert.equal(reader.statusCode, 200);
+    assert.equal(reader.body, allowed.body);
     assert.equal(allowed.statusCode, 200);
     assert.equal(allowed.json().verses[0].text, 'Imported during fetch.');
     assert.equal(allowed.json().expiresAt, null);
@@ -256,15 +256,15 @@ describe('CSB from API.Bible (S13)', () => {
     cookie = (await signIn(h, ownerEmail)).cookie;
     h.clock.advance(30 * day);
     mode = 'down';
-    const [imported, denied] = await Promise.all([
+    const [imported, reader] = await Promise.all([
       get('/api/content/CSB/ROM/1'),
       h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: readerCookie } }),
     ]);
-    assert.equal(denied.statusCode, 403);
-    assert.doesNotMatch(denied.body, /Imported fixture/);
+    assert.equal(reader.statusCode, 200);
+    assert.equal(reader.body, imported.body);
     const manifest = await h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1/download-manifest', cookies: { bs_session: readerCookie } });
-    assert.equal(manifest.statusCode, 403);
-    assert.doesNotMatch(manifest.body, /assets|sha256/);
+    assert.equal(manifest.statusCode, 200);
+    assert.equal(manifest.json().assets[0].sha256, sha256Hex(reader.body));
     assert.equal(imported.statusCode, 200);
     assert.equal(imported.json().expiresAt, null);
     assert.equal(imported.json().fums, undefined);

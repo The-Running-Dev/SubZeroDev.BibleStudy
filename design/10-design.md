@@ -83,7 +83,7 @@ All server entities are persisted in PostgreSQL unless marked *in-memory*. Ident
 
 **Translation**
 - Fields: `id` (`BSB`, `CSB`), `name`, `sourceKind` (`aolab` | `files` | `apibible`), `edition` (source's version identifier and checksum), `licenseSummary`, `copyrightNotice`, `availability` (`available` | `not_configured` | `unavailable`), `availabilityReason`.
-- Rows are seeded by migration. Availability is derived per request from stored content, configuration and caller access. Ben's scraped CSB XML is imported for personal use; imported availability is restricted to the verified `OWNER_EMAIL` account (ADR-0003). API.Bible is an optional independent source for chapters not imported.
+- Rows are seeded by migration. Availability is derived from stored content and source configuration. All signed-in readers see the same imported CSB, including accounts without a group and instances without `OWNER_EMAIL` (ADR-0004). API.Bible is an optional independent source for chapters not imported.
 
 **Chapter**
 - Fields: `translationId`, `bookId` (USFM code, e.g. `ROM`), `chapter`, `verseCount`, `content` (JSON: ordered verse texts plus headings and footnotes as the source provides them), `contentSha256`, `sourceRef`, `fetchedAt`, `expiresAt` (null for BSB and imported CSB; fetchedAt + 14 days for API.Bible CSB).
@@ -529,7 +529,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
    - Rejected: bundling all audio in the image. It is gigabytes per narrator.
 
 4. **CSB text.**
-   - Chosen: Ben's scraped XML imports for personal use, stored persistently and private to the verified `OWNER_EMAIL` account. Group membership grants no imported access. Licensing approval is not an engineering acceptance gate; no legal determination is made (ADR-0003).
+   - Chosen: Ben's scraped XML imports, stored persistently and shared with every signed-in reader. Content access does not depend on group membership or `OWNER_EMAIL` (ADR-0004). Licensing approval is outside engineering acceptance; no legal determination is made.
    - Optional: API.Bible for chapters not imported, retaining its independent configuration, 14-day cache expiry, copyright notice and Fair Use reporting. CSB has no narration.
 
    - Rejected: dropping CSB. It is required by DOD-12.

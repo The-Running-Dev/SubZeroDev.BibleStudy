@@ -1,6 +1,8 @@
 # ADR-0003: Keep imported CSB private to the configured personal account
 
-- **Status:** Accepted personal-use access policy
+- **Status:** Superseded by [ADR-0004](0004-shared-imported-csb.md)
+
+This is a historical record. The current policy serves the same imported CSB to every signed-in reader; the personal-account restriction and imported-only offline scope checks below no longer apply.
 - **Date:** 2026-11-01
 - **Revised:** 2026-11-09
 
