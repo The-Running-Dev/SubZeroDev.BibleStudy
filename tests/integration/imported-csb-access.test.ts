@@ -141,7 +141,7 @@ test('S19/S20 shared scripture does not grant operational or assistant access, e
         }
       }
     }
-    await h.db.query('UPDATE memberships SET removed_at = $1 WHERE user_id = $2', [h.clock.now(), owner.userId]);
+    await h.db.query("UPDATE memberships SET role = 'member', removed_at = $1 WHERE user_id = $2", [h.clock.now(), owner.userId]);
     const formerOwner = await get('/api/owner/status', owner.cookie);
     assert.equal(formerOwner.statusCode, 403);
     assert.doesNotMatch(formerOwner.body, /private-operations|counts|connector/);

@@ -123,7 +123,7 @@ describe('owner status UI (S20)', () => {
           await control.click();
           const panel = page.getByRole('region', { name: 'Operational status', exact: true });
           await panel.getByText('Study reminder to private-status@example.test').waitFor();
-          await h.db.query('UPDATE memberships SET removed_at = $1 WHERE user_id = $2', [
+          await h.db.query("UPDATE memberships SET role = 'member', removed_at = $1 WHERE user_id = $2", [
             h.clock.now(),
             owner.userId,
           ]);
