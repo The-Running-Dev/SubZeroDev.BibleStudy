@@ -9,7 +9,15 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-11-09 — Everyone signed in sees the same imported content
+- **Context:** Ben explicitly rejected the personal-account content restriction and requested that everyone see the same content.
+- **Chosen:** Share imported CSB chapters, catalogs, ETags and manifests with every signed-in account, independent of group membership and OWNER_EMAIL. Remove CSB_IMPORTED_ACCESS and imported-only account scopes. Keep sign-in and existing private-data, group-control and assistant-use permissions.
+- **Offline:** Stop purging unscoped imports and accept valid legacy scoped bodies. Normal per-account device storage and API.Bible expiry remain unchanged. Installed clients must update; copies already purged can be downloaded again.
+- **Sources:** Imports remain persistent and take precedence over API.Bible at the shared chapter key for every reader. No data removal or migration is required. Automatic deployment on merge remains enabled.
+- **Supersedes:** The personal-only audience and access rules in the earlier 2026-11-09 decision and ADR-0003. Current behavior and regression criteria are in [ADR-0004](../docs/decisions/0004-shared-imported-csb.md).
+
 ### 2026-11-09 — Personal CSB imports and deploy on every merge
+- **Historical:** The personal-account restriction below is superseded by the shared-content decision above. Automatic deployment remains current.
 - **Context:** Ben clarified that he scraped the XML from an online site for personal use only, and instructed that PR merges should always deploy. The particular source website is not established here.
 - **Chosen:** Keep imported CSB private to the verified `OWNER_EMAIL` application account, including manifests, assistant passage loading and offline copies. Owner identifies an application account, not ownership of the text. Keep the missing-owner refusal, optional `disabled` mode and synthetic account-matrix tests.
 - **Chosen:** Record the supplied provenance and intended use without a legal determination. Licensing approval is not an engineering acceptance or deployment gate for this personal-use scope. Group sharing is outside scope. API.Bible stays optional with its existing independent behavior and shared-key limitation (ADR-0003).

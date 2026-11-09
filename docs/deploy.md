@@ -29,7 +29,7 @@ These are account and server settings, so they are the owner's to make. Nothing 
    ```bash
    docker exec "$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)" node src/server/content/import-cli.ts --translation BSB
    ```
-7. **Import personal CSB XML.** Set `OWNER_EMAIL` to Ben's sign-in address and keep `CSB_IMPORTED_ACCESS=owner` (default). Only that verified account can read/download imports; no group access is enabled. `disabled` optionally stops new imported reads/downloads for everyone. The XML was scraped from an online site for personal use and stays outside git and the image. Licensing approval is not an engineering gate; this records intended use without a legal determination. See [ADR-0003](decisions/0003-imported-csb-access.md). Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
+7. **Import CSB XML for all signed-in readers.** Ben supplied the scraped XML; it stays outside git and the image. Every signed-in account can read/download imported chapters, without group membership or a configured `OWNER_EMAIL`. `CSB_IMPORTED_ACCESS` is removed; an old value in the stack environment is ignored and may be removed. See [ADR-0004](decisions/0004-shared-imported-csb.md). Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
 
    ```bash
    app="$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)"
@@ -38,7 +38,7 @@ These are account and server settings, so they are the owner's to make. Nothing 
    docker exec -u 0 "$app" rm -rf /tmp/CSB && rm -rf /tmp/CSB
    ```
 
-   Only the configured owner can read/download imported text under the default policy. New offline imports are account-scoped; old unscoped downloads are discarded when inspected by an updated client. Already copied files and disconnected authorized copies cannot be recalled. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed.
+   Every signed-in reader can read/download the same imported text. Offline downloads remain stored separately per account, as for BSB; imported-only account scopes are no longer enforced and unscoped copies are no longer purged. Older installed clients must update to use the shared policy. Copies already purged by an older client can be downloaded again. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed.
 
 ## Environment variables
 
@@ -51,8 +51,7 @@ Set these in the Portainer stack (or a git-ignored `.env` next to `compose.yaml`
 | `SMTP_URL` | yes | The mail relay, for example `smtps://user:password@smtp.example.org:465`. |
 | `PUBLIC_URL` | yes | `https://<hostname>`, used in emailed links. |
 | `MAIL_FROM` | no | Sender address for sign-in codes and invitations. |
-| `OWNER_EMAIL` | for imported CSB | The verified personal account that may read/download imported CSB; also used for group creation. Unset denies imported CSB to everyone. |
-| `CSB_IMPORTED_ACCESS` | no | `owner` (default) keeps imports private to `OWNER_EMAIL`; `disabled` denies everyone. |
+| `OWNER_EMAIL` | no | The account used for group creation. It does not restrict content; imported CSB works when unset. |
 | `ASSISTANT_OWNER_EMAIL`, `CONNECTOR_TOKEN` | no | The study assistant (S6). Without them it shows offline. |
 | `BIBLESTUDY_IMAGE` | no | Pin a build, `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>`, for a rollback. |
 | `PROXY_NETWORK` | no | Default `proxy-net`. |

@@ -313,15 +313,15 @@ Acceptance:
 Out of scope: new features.
 
 
-## S19 — Keep personal CSB imports private
+## S19 — Share imported CSB with all signed-in readers
 Status: implemented; validation results recorded in the pull request
-Delivers: Personal reading and account-scoped offline copies of scraped CSB XML, restricted to the configured application account. Licensing approval is not an engineering gate.
-Touches: content access/catalog, web/assistant loading, manifests, offline records, configuration, documentation
+Delivers: Identical imported CSB content and offline-download access for every signed-in reader, including accounts without group membership or a configured owner.
+Touches: content catalog, web/assistant loading, manifests, offline records, configuration, documentation
 Depends on: S13, S14, S18, PR #24
 Acceptance:
-  - S19.1 Signed-out requests return 401; signed-in solo accounts and ordinary members cannot retrieve imported CSB or its manifests, including encoded, HEAD and conditional requests.
-  - S19.2 Only the verified OWNER_EMAIL account can read/download imports; no owner or disabled imports refuses everyone. Membership is not required for owner solo reading.
-  - S19.3 Imported book availability is account-specific; BSB solo reading/downloads and expiring API.Bible content retain their behavior.
-  - S19.4 New imported offline copies are scoped to the authorized account; old unscoped copies are purged by the updated client. Assistant permission alone grants no imported access.
-  - S19.5 Record the scraped-XML provenance and personal-only audience without a legal determination. Verify deployed revision and account behavior separately from CI; no licence-document approval is required for engineering acceptance. See ADR-0003.
-Out of scope: enabling group distribution, declaring licence permission, recalling exported files, deploying without the established merge workflow.
+  - S19.1 Signed-out content requests return 401, including encoded, HEAD and conditional requests.
+  - S19.2 Owner, ordinary member and solo accounts receive identical imported chapter bodies, ETags, catalogs and manifests. Missing or mismatched OWNER_EMAIL does not restrict scripture access; obsolete CSB_IMPORTED_ACCESS values are ignored.
+  - S19.3 Imports remain persistent and take precedence over API.Bible for every reader; BSB and expiring API.Bible rows retain their behavior, including concurrent fetch/import handling.
+  - S19.4 Unscoped imports can be downloaded and read offline; valid legacy scoped copies also remain readable. Device storage stays keyed by account. Existing private-data and assistant-use permissions remain intact.
+  - S19.5 Record supplied scraped-XML provenance without a legal determination or licence-document engineering gate. Verify deployed revision separately from CI. See ADR-0004.
+Out of scope: anonymous public content routes, changing group controls or private-data permissions, recalling exported files, deploying outside the established merge workflow.

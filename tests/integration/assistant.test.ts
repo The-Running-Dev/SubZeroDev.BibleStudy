@@ -702,7 +702,7 @@ describe('what reaches the browser (S6.8)', () => {
 });
 
 
-test('assistant permission does not grant imported CSB access to a different account', async () => {
+test('a permitted assistant account loads the same imported CSB without being the configured owner', async () => {
   const email = 'assistant-only@example.test';
   const original = h.config.assistantOwnerEmail;
   h.config.assistantOwnerEmail = email;
@@ -715,9 +715,11 @@ test('assistant permission does not grant imported CSB access to a different acc
     const response = await api('POST', cookie, `/api/assistant/conversations/${id}/turns`, {
       clientTurnId: randomUUID(), prompt: 'Explain this passage', context: { ...romans(1, 1), translationId: 'CSB' },
     });
-    assert.equal(response.statusCode, 403);
-    assert.equal(response.json().error, 'content_not_permitted');
-    assert.equal((await h.db.query('SELECT 1 FROM assistant_turns')).rowCount, 0);
-    assert.equal(linked.received.filter((m) => m.t === 'dispatch').length, 0);
+    assert.equal(response.statusCode, 202);
+    await until(() => linked.received.some((m) => m.t === 'dispatch'));
+    assert.equal((await h.db.query('SELECT 1 FROM assistant_turns')).rowCount, 1);
+    const dispatched = linked.received.find((m) => m.t === 'dispatch');
+    assert.ok(dispatched && dispatched.t === 'dispatch');
+    assert.match(dispatched.text, /Romans 1:1/);
   } finally { h.config.assistantOwnerEmail = original; }
 });

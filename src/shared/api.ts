@@ -23,7 +23,6 @@ export type ErrorCode =
   | 'code_invalid'
   | 'code_expired'
   | 'rate_limited'
-  | 'content_not_permitted'
   | 'unauthenticated'
   | 'invalid_zone'
   | 'invalid_request'
@@ -97,7 +96,6 @@ export interface ChapterContent {
 }
 
 export interface ChapterView extends ChapterContent {
-  restrictedToUserId?: Uuid; // Imported CSB only; binds an offline copy to the authorized account.
   translationId: TranslationId;
   bookId: BookId;
   chapter: number;
@@ -123,7 +121,6 @@ export interface RecordingView {
 
 // Everything a device stores to read a chapter offline, with the hash of each asset's exact bytes (I-27).
 export interface DownloadManifest {
-  restrictedToUserId?: Uuid;
   assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[];
   totalBytes: number;
   expiresAt: IsoInstant | null;
