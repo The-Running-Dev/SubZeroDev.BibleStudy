@@ -34,6 +34,7 @@ x-app: &app
     SMTP_URL: "${SMTP_URL:?Set SMTP_URL}"
     MAIL_FROM: "${MAIL_FROM:-Bible Study <no-reply@localhost>}"
     PUBLIC_URL: "${PUBLIC_URL:?Set PUBLIC_URL}"
+    CSB_IMPORTED_ACCESS: "${CSB_IMPORTED_ACCESS:-owner}"
     OWNER_EMAIL: "${OWNER_EMAIL:-}"
     COOKIE_SECURE: "${COOKIE_SECURE:-true}"
     # One proxy hop in front: the reverse proxy on proxy-net.

@@ -11,7 +11,7 @@ import { createCsbFileSource } from '../../src/server/content/csb-files.ts';
 import { importText, runImport } from '../../src/server/content/import.ts';
 import { sha256Hex } from '../../src/server/platform/secrets.ts';
 import type { Harness } from '../support/harness.ts';
-import { clearMailbox, signIn, startHarness, truncateAll } from '../support/harness.ts';
+import { clearMailbox, ownerEmail, signIn, startHarness, truncateAll } from '../support/harness.ts';
 
 const aoLabUrl = process.env.AOLAB_BASE_URL ?? 'https://bible.helloao.org';
 const noSleep = async () => {};
@@ -347,6 +347,7 @@ describe("CSB imported from the owner's files", () => {
 
   before(async () => {
     await freshMember();
+    cookie = (await signIn(h, ownerEmail)).cookie;
     dir = await mkdtemp(join(tmpdir(), 'csb-import-'));
     await writeFile(join(dir, '57-Phm.xml'), philemon);
   });

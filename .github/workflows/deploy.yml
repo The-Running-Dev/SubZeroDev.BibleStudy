@@ -1,7 +1,7 @@
 name: Deploy
 
-# A merge to main publishes the image compose.yaml pulls, then (only when the owner has turned
-# deploys on) asks Portainer to redeploy the stack. docs/deploy.md has the one-time setup.
+# Every merge to main publishes the drilled image and asks Portainer to redeploy the stack.
+# docs/deploy.md has the webhook and hostname setup.
 on:
   push:
     branches: [main]
@@ -76,9 +76,8 @@ jobs:
   deploy:
     name: deploy
     needs: image
-    # Off until the owner sets the repository variable DEPLOY_ENABLED to true and adds the
-    # PORTAINER_REDEPLOY_WEBHOOK_URL secret; until then a merge only publishes the image.
-    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    # Every merge deploys after publication. A missing webhook secret fails visibly below.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Redeploy the Portainer stack

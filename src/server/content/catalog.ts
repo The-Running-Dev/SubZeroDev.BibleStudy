@@ -6,6 +6,8 @@ import { AppError } from '../platform/errors.ts';
 import { log } from '../platform/log.ts';
 import { ApiBibleError, csbCacheMs, failureReason } from './apibible.ts';
 import type { ApiBible } from './apibible.ts';
+import { importedCsbDenied, noImportedCsb } from './access.ts';
+import type { ContentAccess } from './access.ts';
 import { narrationAvailability } from './narration.ts';
 import { contentHash, serializeContent } from './normalize.ts';
 
@@ -33,9 +35,12 @@ async function csbImported(db: Queryable): Promise<boolean> {
   return Boolean(result.rowCount);
 }
 
-async function textAvailability(db: Queryable, translationId: TranslationId, csb: Csb | null): Promise<Availability> {
+async function textAvailability(db: Queryable, translationId: TranslationId, csb: Csb | null, access: ContentAccess): Promise<Availability> {
   if (translationId === 'CSB') {
-    if (await csbImported(db)) return { state: 'available' };
+    if (await csbImported(db)) {
+      if (access.importedCsbUserId) return { state: 'available' };
+      if (!csb) return { state: 'unavailable', reason: importedCsbDenied().message };
+    }
     return csb ? csb.api.status() : csbNotConfigured;
   }
   const result = await db.query('SELECT 1 FROM chapters WHERE translation_id = $1 LIMIT 1', [translationId]);
@@ -47,7 +52,7 @@ function unavailable(availability: Availability): AppError {
   return new AppError('translation_unavailable', 409, reason, { details: { availability } });
 }
 
-export async function listTranslations(db: Queryable, csb: Csb | null): Promise<TranslationView[]> {
+export async function listTranslations(db: Queryable, csb: Csb | null, access: ContentAccess = noImportedCsb): Promise<TranslationView[]> {
   const rows = await db.query<{ id: TranslationId; name: string; copyright_notice: string }>(
     'SELECT id, name, copyright_notice FROM translations ORDER BY id',
   );
@@ -56,14 +61,14 @@ export async function listTranslations(db: Queryable, csb: Csb | null): Promise<
       id: row.id,
       name: row.name,
       copyrightNotice: row.copyright_notice,
-      availability: await textAvailability(db, row.id, csb),
+      availability: await textAvailability(db, row.id, csb, access),
       narration: await narrationAvailability(db, row.id),
     })),
   );
 }
 
-export async function listBooks(db: Queryable, translationId: TranslationId, csb: Csb | null): Promise<BookView[]> {
-  const availability = await textAvailability(db, translationId, csb);
+export async function listBooks(db: Queryable, translationId: TranslationId, csb: Csb | null, access: ContentAccess = noImportedCsb): Promise<BookView[]> {
+  const availability = await textAvailability(db, translationId, csb, access);
   if (availability.state !== 'available') throw unavailable(availability);
   // With API.Bible, any CSB chapter can be fetched, so its canon is the shared one; without it, only the books
   // the owner imported can be read.
@@ -94,7 +99,7 @@ interface ChapterRow {
 
 const selectChapter = 'SELECT verse_count, content, content_sha256, expires_at, fums_token FROM chapters WHERE translation_id = $1 AND book_id = $2 AND chapter = $3';
 
-// I-11: an imported CSB chapter is always served. A cached API.Bible chapter is served only before its expiry;
+// I-11: imported CSB is loaded here; getChapter enforces its account boundary before returning it. A cached API.Bible chapter is served only before its expiry;
 // expired copies are deleted first, so the licence's 14-day limit holds even when the refetch fails, and a missing
 // or expired chapter is fetched from API.Bible.
 async function csbChapter(db: Queryable, csb: Csb | null, bookId: string, chapter: number): Promise<ChapterRow> {
@@ -148,7 +153,7 @@ async function loadCsbChapter(db: Queryable, csb: Csb, bookId: string, chapter: 
   return row.rows[0] ?? (await db.query<ChapterRow>(selectChapter, ['CSB', bookId, chapter])).rows[0];
 }
 
-export async function getChapter(db: Queryable, translationId: TranslationId, bookId: string, chapter: number, csb: Csb | null): Promise<StoredChapter> {
+export async function getChapter(db: Queryable, translationId: TranslationId, bookId: string, chapter: number, csb: Csb | null, access: ContentAccess = noImportedCsb): Promise<StoredChapter> {
   const book = bookById(bookId);
   if (!book || !Number.isInteger(chapter) || chapter < 1 || chapter > book.chapters) {
     throw new AppError('chapter_not_found', 404, `${bookId} ${chapter} is not a chapter.`);
@@ -162,7 +167,12 @@ export async function getChapter(db: Queryable, translationId: TranslationId, bo
     row = result.rows[0];
   }
 
+  // Check after the shared load too: an import may win a race with an API.Bible fetch.
+  const imported = translationId === 'CSB' && row.expires_at === null;
+  if (imported && !access.importedCsbUserId) throw importedCsbDenied();
+
   const head = JSON.stringify({
+    ...(imported ? { restrictedToUserId: access.importedCsbUserId } : {}),
     translationId,
     bookId: book.id,
     chapter,
@@ -172,7 +182,7 @@ export async function getChapter(db: Queryable, translationId: TranslationId, bo
     ...(row.fums_token ? { fums: { token: row.fums_token } } : {}),
   });
   // Both are JSON objects: drop the head's closing brace and the content's opening one, and join.
-  const etag = row.expires_at ? `"${row.content_sha256}-${row.expires_at.getTime()}"` : `"${row.content_sha256}"`;
+  const etag = row.expires_at ? `"${row.content_sha256}-${row.expires_at.getTime()}"` : `"${row.content_sha256}${imported ? `-${access.importedCsbUserId}` : ''}"`;
   return {
     contentSha256: row.content_sha256,
     etag,

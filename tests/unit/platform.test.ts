@@ -52,6 +52,12 @@ describe('loadConfig', () => {
     assert.equal(config.buildId, 'dev');
   });
 
+  test('imported CSB defaults to owner only, can be disabled, and rejects wider modes', () => {
+    assert.equal(loadConfig(base).csbImportedAccess, 'owner');
+    assert.equal(loadConfig({ ...base, CSB_IMPORTED_ACCESS: 'disabled' }).csbImportedAccess, 'disabled');
+    assert.throws(() => loadConfig({ ...base, CSB_IMPORTED_ACCESS: 'group' }), /CSB_IMPORTED_ACCESS must be owner or disabled/);
+  });
+
   test('S13 API.Bible is off without a key, and a key needs the CSB Bible id', () => {
     assert.equal(loadConfig(base).apibible, null);
     assert.deepEqual(loadConfig({ ...base, APIBIBLE_KEY: 'k', APIBIBLE_CSB_BIBLE_ID: 'csb-id' }).apibible, {

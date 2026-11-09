@@ -1,11 +1,6 @@
 # Deploying to the VPS
 
-The app runs on the owner's VPS as a Portainer Git stack defined by [compose.yaml](../compose.yaml). GitHub Actions publishes the image on every merge to `main`, and the stack pulls it.
-
-```
-merge to main ─▶ deploy.yml builds the image ─▶ ghcr.io/the-running-dev/subzerodev.biblestudy:<sha> and :latest
-                                             └▶ (DEPLOY_ENABLED) POST the Portainer webhook ─▶ stack pulls :latest, migrates, restarts
-```
+The app runs on the owner's VPS as a Portainer Git stack defined by [compose.yaml](../compose.yaml). On every merge to `main`, GitHub Actions builds and drills the image, publishes `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`, then calls the Portainer webhook so the stack pulls the image, migrates and restarts. There is no separate deployment opt-in flag.
 
 ## The stack
 
@@ -28,13 +23,13 @@ These are account and server settings, so they are the owner's to make. Nothing 
 2. **The proxy network exists** on the VPS. The stack expects `proxy-net`; set `PROXY_NETWORK` if yours is named differently. It is declared external, so the stack fails to start rather than create a network the proxy cannot reach.
 3. **The hostname resolves and is routed.** Add the DNS record (proposed: `biblestudy.subzerodev.com`) and a proxy route from it to `http://biblestudy-app:3000`, with TLS terminated at the proxy. The route must pass WebSocket upgrades (`/ws`, `/connector`).
 4. **Create the stack in Portainer:** Stacks → Add stack → Repository. Repository URL `https://github.com/The-Running-Dev/SubZeroDev.BibleStudy`, reference `refs/heads/main`, compose path `compose.yaml`. Set the environment variables below. Turn on the stack webhook and copy its URL.
-5. **Turn on automatic deploys:** in the repository's Settings → Secrets and variables → Actions, add the secret `PORTAINER_REDEPLOY_WEBHOOK_URL` with the webhook URL, and the variable `DEPLOY_ENABLED` = `true`. Until both exist, a merge only publishes the image. Add the variable `PUBLIC_URL` = `https://<hostname>` too, and the deploy waits up to five minutes for the site to serve the merged commit, failing if it does not.
+5. **Configure automatic deploys:** in the repository's Settings → Secrets and variables → Actions, add the secret `PORTAINER_REDEPLOY_WEBHOOK_URL` with the webhook URL. Every merge to `main` requests deployment after the image passes its drill and is published; a missing webhook secret fails the deploy job instead of silently skipping it. `DEPLOY_ENABLED` is no longer used. Add the variable `PUBLIC_URL` = `https://<hostname>` too, and the deploy waits up to five minutes for the site to serve the merged commit, failing if it does not.
 6. **Import the text** once the stack is up, from the VPS shell:
 
    ```bash
    docker exec "$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)" node src/server/content/import-cli.ts --translation BSB
    ```
-7. **Import CSB** from the owner's files, if you hold them. They are licensed text, so they are never in git or the image. Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
+7. **Import personal CSB XML.** Set `OWNER_EMAIL` to Ben's sign-in address and keep `CSB_IMPORTED_ACCESS=owner` (default). Only that verified account can read/download imports; no group access is enabled. `disabled` optionally stops new imported reads/downloads for everyone. The XML was scraped from an online site for personal use and stays outside git and the image. Licensing approval is not an engineering gate; this records intended use without a legal determination. See [ADR-0003](decisions/0003-imported-csb-access.md). Copy the folder of `NN-Book.xml` files to the VPS (for example `scp -r bibles/CSB vps:/tmp/CSB`), then copy it into the app, import it, and delete both copies:
 
    ```bash
    app="$(docker ps -q --filter label=com.docker.compose.project=subzerodev-biblestudy --filter label=com.docker.compose.service=biblestudy)"
@@ -43,7 +38,7 @@ These are account and server settings, so they are the owner's to make. Nothing 
    docker exec -u 0 "$app" rm -rf /tmp/CSB && rm -rf /tmp/CSB
    ```
 
-   The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed. CSB is copyrighted: serving it on a public site, even behind sign-in, needs the owner's licence (D-2026-11-01 in [the decision log](../design/90-decisions.md)).
+   Only the configured owner can read/download imported text under the default policy. New offline imports are account-scoped; old unscoped downloads are discarded when inspected by an updated client. Already copied files and disconnected authorized copies cannot be recalled. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed.
 
 ## Environment variables
 
@@ -56,7 +51,8 @@ Set these in the Portainer stack (or a git-ignored `.env` next to `compose.yaml`
 | `SMTP_URL` | yes | The mail relay, for example `smtps://user:password@smtp.example.org:465`. |
 | `PUBLIC_URL` | yes | `https://<hostname>`, used in emailed links. |
 | `MAIL_FROM` | no | Sender address for sign-in codes and invitations. |
-| `OWNER_EMAIL` | no | The account that may create groups. |
+| `OWNER_EMAIL` | for imported CSB | The verified personal account that may read/download imported CSB; also used for group creation. Unset denies imported CSB to everyone. |
+| `CSB_IMPORTED_ACCESS` | no | `owner` (default) keeps imports private to `OWNER_EMAIL`; `disabled` denies everyone. |
 | `ASSISTANT_OWNER_EMAIL`, `CONNECTOR_TOKEN` | no | The study assistant (S6). Without them it shows offline. |
 | `BIBLESTUDY_IMAGE` | no | Pin a build, `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>`, for a rollback. |
 | `PROXY_NETWORK` | no | Default `proxy-net`. |
