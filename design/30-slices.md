@@ -140,7 +140,7 @@ Delivers: The owner can run the app on their VPS from a merged commit, with nigh
 Touches: container image, compose stack, GitHub Actions publish workflow, backup job, deploy docs
 Depends on: S1
 Acceptance:
-  - S7.1 A merge to `main` pushes `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`. The webhook call is skipped unless `DEPLOY_ENABLED` is `true`.
+  - S7.1 A merge to `main` pushes `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`. After the image drill and publication succeed, every merge calls the Portainer webhook. A missing webhook secret fails deployment; there is no opt-in flag.
   - S7.2 `docker compose up` from the repository's stack file with `.env.example` values (passwords replaced) serves `/__build-id` on the app port. Postgres data and media survive `docker compose down && up`.
   - S7.3 The backup job writes a `pg_dump` and a media manifest. Restoring them into an empty stack reproduces users, groups and chapters (row counts and chapter checksums equal). The drill result is recorded.
   - S7.4 A migration that fails exits the container non-zero before the listener opens.
@@ -313,9 +313,9 @@ Acceptance:
 Out of scope: new features.
 
 
-## S19 — Contain imported CSB distribution
+## S19 — Keep personal CSB imports private
 Status: implemented; validation results recorded in the pull request
-Delivers: A reversible owner-only default for imported CSB, independent of group membership and licensing approval.
+Delivers: Personal reading and account-scoped offline copies of scraped CSB XML, restricted to the configured application account. Licensing approval is not an engineering gate.
 Touches: content access/catalog, web/assistant loading, manifests, offline records, configuration, documentation
 Depends on: S13, S14, S18, PR #24
 Acceptance:
@@ -323,5 +323,5 @@ Acceptance:
   - S19.2 Only the verified OWNER_EMAIL account can read/download imports; no owner or disabled imports refuses everyone. Membership is not required for owner solo reading.
   - S19.3 Imported book availability is account-specific; BSB solo reading/downloads and expiring API.Bible content retain their behavior.
   - S19.4 New imported offline copies are scoped to the authorized account; old unscoped copies are purged by the updated client. Assistant permission alone grants no imported access.
-  - S19.5 Technical containment, owner licensing confirmation and observed deployment state are reported separately. See ADR-0003.
+  - S19.5 Record the scraped-XML provenance and personal-only audience without a legal determination. Verify deployed revision and account behavior separately from CI; no licence-document approval is required for engineering acceptance. See ADR-0003.
 Out of scope: enabling group distribution, declaring licence permission, recalling exported files, deploying without the established merge workflow.

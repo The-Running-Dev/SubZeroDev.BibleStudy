@@ -28,7 +28,7 @@ Each invariant names the module that maintains it.
 
 ### content
 - **I-10** A Chapter's `contentSha256` is the SHA-256 of its stored `content`, and the API serves that content unchanged.
-- **I-11** A CSB Chapter cached from API.Bible is never served when `now ≥ expiresAt`. Imported CSB is readable only by the verified `OWNER_EMAIL` account under `CSB_IMPORTED_ACCESS=owner`; unset owner or `disabled` denies everyone. Group membership grants nothing. The account boundary applies to catalogs, chapter retrieval, download manifests, offline copies and assistant loading. CSB text comes only from the owner's imported CSB files (`expiresAt` null, never overwritten by an API fetch) or the configured licensed API.
+- **I-11** A CSB Chapter cached from API.Bible is never served when `now ≥ expiresAt`. Imported CSB is for personal use and readable only by the verified `OWNER_EMAIL` account under `CSB_IMPORTED_ACCESS=owner`; unset owner or `disabled` denies everyone. Group membership grants nothing. The account boundary applies to catalogs, chapter retrieval, download manifests, offline copies and assistant loading. Here, owner means the configured application account. Licensing approval is not an engineering acceptance gate; no legal determination is made. CSB text comes only from Ben's scraped XML imports (`expiresAt` null, never overwritten by an API fetch) or the configured licensed API.
 - **I-12** A Recording is only served for the translation in its `translationId`. The media bytes served hash to `mediaSha256`.
 - **I-13** Recording `timing` is used for verse following only when `timingStatus = 'verified'`.
   - `verified` means exactly `verseCount` strictly increasing values, all `< durationSeconds`.

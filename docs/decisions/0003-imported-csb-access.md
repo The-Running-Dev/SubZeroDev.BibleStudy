@@ -1,15 +1,16 @@
-# ADR-0003: Restrict imported CSB to the configured owner
+# ADR-0003: Keep imported CSB private to the configured personal account
 
-- **Status:** Accepted technical containment; licensing approval remains open
+- **Status:** Accepted personal-use access policy
 - **Date:** 2026-11-01
+- **Revised:** 2026-11-09
 
 ## Context
 
-PR #24 stores imported CSB chapters without an expiry. Authentication alone previously admitted every signed-in account, including accounts with no memberships. Keeping XML outside Git and images does not authorize distribution of the imported database text. No licence document or deployed-content exposure was inspected in this change.
+PR #24 stores imported CSB chapters without an expiry. Authentication alone previously admitted every signed-in account, including accounts with no memberships. Ben clarified on 2026-11-09 that he scraped the XML from an online site for his personal use only. No particular source website has been established in this decision. The imports are private data for his configured application account; group members and other signed-in accounts are outside that audience.
 
 ## Decision
 
-`CSB_IMPORTED_ACCESS=owner` is the conservative default. Only the verified server session whose user matches `OWNER_EMAIL` may retrieve imported CSB. No `OWNER_EMAIL` means nobody. `CSB_IMPORTED_ACCESS=disabled` refuses everyone, including the owner. Unknown modes fail startup. Neither a group owner role, membership nor `ASSISTANT_OWNER_EMAIL` grants imported-text access. The setting is reversible without deleting imported data; it is containment, not a finding that personal hosted use is licensed.
+`CSB_IMPORTED_ACCESS=owner` is the conservative default. Only the verified server session whose user matches `OWNER_EMAIL` may retrieve imported CSB. No `OWNER_EMAIL` means nobody. `CSB_IMPORTED_ACCESS=disabled` refuses everyone, including the owner. Unknown modes fail startup. Neither a group owner role, membership nor `ASSISTANT_OWNER_EMAIL` grants imported-text access. Here, owner means the configured application account, not ownership of the CSB text. The setting is reversible without deleting imported data.
 
 The shared catalog loader denies imported CSB by default. Web chapter reads, HEAD/conditional requests, manifests and assistant passage loading explicitly pass the caller's resolved access. The check runs after any shared API.Bible load, including when an import wins a race. Imported chapters cannot be returned to a denied account even when an API key is configured. Such accounts see CSB unavailable when imports are its only source and receive no imported book list. CSB remains a known translation; configuring API.Bible may independently make its catalog available.
 
@@ -17,24 +18,19 @@ All CSB chapter responses and account-specific catalogs use `no-store`. Imported
 
 No migration or destructive content cleanup is required. The existing `CSB + expires_at IS NULL` import discriminator is retained; API.Bible rows keep their 14-day expiry and FUMS tokens. Narration remains unavailable for CSB. Group/session endpoints carry references and playback state, not chapter text; export carries personal data, not a Bible corpus.
 
-## Options and the owner's outstanding decision
+## Personal-use scope and source behavior
 
-| Option | Technical implications | Permission still required |
-| --- | --- | --- |
-| Owner only (current default) | Verified `OWNER_EMAIL`; solo reading and account-scoped downloads; `disabled` can stop new reads/downloads. | Confirm the actual XML licence covers personal hosted storage/display, backups, offline copies and any selected text sent to the assistant/provider. |
-| Authorized group sharing (not implemented) | Requires an explicit permitted group/audience policy, active membership checks at every content path, catalog filtering, and a revocation/expiry policy for offline copies. A generic member role is insufficient across groups. | Identify the specific licence/grant permitting the named hosted audience, amount of text, downloads, duration, attribution, territory and any assistant processing. Record evidence and limits before implementing a wider mode. |
-| API.Bible | Requires approved CSB access for this app, server key, copyright display, FUMS and refresh/expiry. Existing 14-day expiry is preserved. An imported row currently occupies the same chapter key and blocks a nonowner from that chapter; a full switch needs separate source storage or a reviewed archive/removal of imported rows, not automatic relabeling. | Confirm the app's account/plan and CSB grant cover its audience and offline use. A key alone or an older Starter-plan note is not proof. API.Bible permission does not license these XML files. |
+- Imported XML is used for Ben's personal reading, persistent storage, backups and account-scoped offline copies. XML, imported text and database backups stay outside the public repository and container image.
+- Licensing approval is not an engineering acceptance or deployment gate for this personal-use scope. This decision records the supplied provenance and intended use; it makes no legal determination or claim that a licence or ownership of the text has been verified.
+- Group sharing of imported CSB is outside the requested scope. Group features may continue using BSB. A broader audience would need a separate product decision and access design.
+- The existing assistant may load imported passages only for the same personal account, with its separate assistant permission also required. Selected passage text is sent through the connector to the configured runtime/provider; this feature is not a promise of device-local processing.
+- API.Bible remains optional and independent. Its existing key/Bible-id configuration, copyright display, FUMS and 14-day expiry remain unchanged. It is not required to read an imported chapter, and its cache rules are not applied to imports.
+- Imported and API.Bible chapters share a storage key. An imported row takes precedence and a nonowner receives 403 for it, even with API.Bible configured. Separate source storage would be needed to serve the API.Bible version independently; no imported rows are removed or relabeled here.
 
-The owner must supply/confirm the applicable licence or rights-holder grant and choose the permitted audience and uses. No group permission is invented here. If even owner-hosted use is unconfirmed, `CSB_IMPORTED_ACCESS=disabled` is available immediately. The public quotation allowance is not treated as permission to host a complete Bible.
-
-Primary references checked 2026-11-01:
-
-- [Holman's CSB Reader's Bible copyright/permissions statement](https://readersbible.csbible.com/wp-content/themes/csbrb-theme/assets/sample.pdf): limited quotations with conditions; written permission beyond that allowance.
-- [API.Bible licensing policies](https://care.api.bible/article/396-licensing-policies-quick-reference): translation-specific access, attribution and FUMS; specific agreements may add requirements.
-- [API.Bible caching guidance](https://care.api.bible/article/401-caching-content): refresh at least every 30 days, 14 days or less recommended. This patch retains the repository's stricter 14-day rule.
+This revision supersedes the earlier licensing-approval checklist and any assumption that these XML files were supplied as a purchased or licensed package. It does not change the access implementation or existing account-matrix acceptance tests.
 
 ## Limits and deployment verification
 
 A server cannot recall files someone already copied. An old client remains subject to its old behavior until updated; the updated client purges legacy unscoped downloads on access. Authorized owner downloads remain offline-readable after server configuration changes: there is no remote revocation while disconnected. The account scope is an application boundary, not encryption/DRM against someone controlling their own browser storage.
 
-Before claiming a deployed fix, merge/deploy this revision, verify `/__build-id`, update installed clients, then exercise the account matrix with synthetic text. Inspect production import/configuration state privately. This source change supplies no evidence about whether a public deployment has imported CSB or served it to anyone.
+Every merge to main automatically runs the image drill, publishes the image and requests the Portainer redeploy. Before claiming deployed protection, verify `/__build-id`, update installed clients, then exercise the account matrix with synthetic text. Inspect production import/configuration state privately. Passing CI or a successful webhook alone does not establish the running account boundary.

@@ -6,11 +6,18 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - Which real phones run the device checks (DOD-23, DOD-28, DOD-29).
 - Whether `biblestudy.subzerodev.com` is the hostname, and who adds its DNS record and proxy route.
 - The owner's status page is promised (10-design failure modes, the contract's mail errors, D-2026-10-30-15) but not built. Escalated to `/plan` for a slice.
-- Whether the owner's CSB licence covers serving the imported text on the public site behind sign-in (2026-11-01). The code imports it; the licence is the owner's to confirm.
 
 ---
 
+### 2026-11-09 — Personal CSB imports and deploy on every merge
+- **Context:** Ben clarified that he scraped the XML from an online site for personal use only, and instructed that PR merges should always deploy. The particular source website is not established here.
+- **Chosen:** Keep imported CSB private to the verified `OWNER_EMAIL` application account, including manifests, assistant passage loading and offline copies. Owner identifies an application account, not ownership of the text. Keep the missing-owner refusal, optional `disabled` mode and synthetic account-matrix tests.
+- **Chosen:** Record the supplied provenance and intended use without a legal determination. Licensing approval is not an engineering acceptance or deployment gate for this personal-use scope. Group sharing is outside scope. API.Bible stays optional with its existing independent behavior and shared-key limitation (ADR-0003).
+- **Chosen:** After a successful image drill and publication, every merge to `main` requests the Portainer redeploy. Remove the `DEPLOY_ENABLED` condition; a missing webhook secret fails the deploy job. Keep build-id verification when `PUBLIC_URL` is configured.
+- **Supersedes:** The licensing-approval checklist and source assumptions in the 2026-11-01 imported-CSB entries and D-2026-10-30-04; the API.Bible-only source choice in D-2026-10-30-04; and the deploy opt-in in D-2026-10-30-15. Earlier entries below remain as historical records. Current behavior is specified by ADR-0003 and the contract.
+
 ### 2026-11-01 — Imported CSB has an owner-only access boundary
+- **Historical:** Source assumptions and licensing-approval gate superseded by the 2026-11-09 personal-use decision above.
 - **Context:** sign-in without membership previously permitted imported chapter and offline-manifest requests; possession of XML establishes no redistribution rights.
 - **Chosen:** `CSB_IMPORTED_ACCESS=owner` by default, bound to the verified `OWNER_EMAIL` account, or `disabled` for nobody. Unset owner denies all. No member/group/assistant-role grant. Catalog, chapter/conditional requests, manifests, offline copies and assistant loading use the boundary. API.Bible's existing 14-day expiry stays.
 - **Offline:** new imported copies carry the account id; the updated client discards legacy unscoped imports. Previously obtained files cannot be recalled, and disconnected owner copies cannot be remotely revoked.
@@ -24,6 +31,7 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - **Rejected:** SSH from Actions to the VPS. Portainer owns the stack and its secrets, as in Adventures.
 
 ### 2026-11-01 — CSB imported from the owner's files
+- **Historical:** Source assumptions and licensing-approval flag superseded by the 2026-11-09 personal-use decision above.
 - **Context:** The owner holds the CSB as 66 `NN-Book.xml` files and asked to "integrate the CSB bible" from them. No API.Bible key exists yet, so CSB was never readable.
 - **Chosen:**
   - `import-content --translation CSB --from <folder>` parses the files into the same chapter content as BSB: verses, headings and footnotes; cross-references, verse numbers and typographic spacing are dropped. Where a verse's own number marker disagrees with its element's reference, the marker wins; a table verse runs from its marker to the next.
@@ -409,6 +417,7 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - **Rejected:** multi-tenant deployment now. It is not needed for one group, and the group id keeps the door open.
 
 ## D-2026-10-30-04 — CSB text from API.Bible's free Starter plan
+- **Historical:** API.Bible-only source choice and imported-source exclusion superseded by the 2026-11-09 personal-use decision above.
 - **Context:**
   - CSB must be selectable (DOD-12).
   - The owner refused to pay for a text licence.

@@ -82,11 +82,11 @@ All server entities are persisted in PostgreSQL unless marked *in-memory*. Ident
 ### Content
 
 **Translation**
-- Fields: `id` (`BSB`, `CSB`), `name`, `sourceKind` (`aolab` | `apibible`), `edition` (source's version identifier and checksum), `licenseSummary`, `copyrightNotice`, `availability` (`available` | `not_configured` | `unavailable`), `availabilityReason`.
-- Rows are seeded by migration. `availability` is derived at startup from configuration (CSB is `not_configured` until an API.Bible key and Bible ID are set).
+- Fields: `id` (`BSB`, `CSB`), `name`, `sourceKind` (`aolab` | `files` | `apibible`), `edition` (source's version identifier and checksum), `licenseSummary`, `copyrightNotice`, `availability` (`available` | `not_configured` | `unavailable`), `availabilityReason`.
+- Rows are seeded by migration. Availability is derived per request from stored content, configuration and caller access. Ben's scraped CSB XML is imported for personal use; imported availability is restricted to the verified `OWNER_EMAIL` account (ADR-0003). API.Bible is an optional independent source for chapters not imported.
 
 **Chapter**
-- Fields: `translationId`, `bookId` (USFM code, e.g. `ROM`), `chapter`, `verseCount`, `content` (JSON: ordered verse texts plus headings and footnotes as the source provides them), `contentSha256`, `sourceRef`, `fetchedAt`, `expiresAt` (null for BSB; fetchedAt + 14 days for CSB).
+- Fields: `translationId`, `bookId` (USFM code, e.g. `ROM`), `chapter`, `verseCount`, `content` (JSON: ordered verse texts plus headings and footnotes as the source provides them), `contentSha256`, `sourceRef`, `fetchedAt`, `expiresAt` (null for BSB and imported CSB; fetchedAt + 14 days for API.Bible CSB).
 - Primary key is `(translationId, bookId, chapter)`.
 
 **Narrator**
@@ -342,7 +342,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 
 **Server:**
 - GitHub Actions builds one container image per merge to `main` and pushes it to GHCR (`ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`).
-- When the repository variable `DEPLOY_ENABLED` is true, it then calls the Portainer redeploy webhook stored in the `PORTAINER_REDEPLOY_WEBHOOK_URL` secret. This is the same pipeline Adventures uses.
+- After the image drill and publication succeed, every merge calls the Portainer redeploy webhook stored in the `PORTAINER_REDEPLOY_WEBHOOK_URL` secret. There is no deployment opt-in flag; a missing secret fails the deploy job. With the repository variable `PUBLIC_URL` set, the job verifies the merged build is serving.
 - The Portainer Git stack, defined by the repository's `compose.yaml`, runs:
   - the app container (service `biblestudy`);
   - PostgreSQL with a named volume;
@@ -529,8 +529,9 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
    - Rejected: bundling all audio in the image. It is gigabytes per narrator.
 
 4. **CSB text.**
-   - Chosen: API.Bible's free Starter plan. It is noncommercial, has up to 3 licensed Bibles and 5,000 calls a month. The owner creates the account and requests CSB, cached text expires after 14 days, Fair Use reporting is on, and there is no CSB audio.
-   - Rejected: copying from read.csbible.com. That is not a licensed source.
+   - Chosen: Ben's scraped XML imports for personal use, stored persistently and private to the verified `OWNER_EMAIL` account. Group membership grants no imported access. Licensing approval is not an engineering acceptance gate; no legal determination is made (ADR-0003).
+   - Optional: API.Bible for chapters not imported, retaining its independent configuration, 14-day cache expiry, copyright notice and Fair Use reporting. CSB has no narration.
+
    - Rejected: dropping CSB. It is required by DOD-12.
    - Rejected: a paid licence. The owner declined paying.
 
