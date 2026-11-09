@@ -25,6 +25,7 @@ import { registerReminderRoutes } from './reminder-routes.ts';
 import { registerScheduleRoutes } from './schedule-routes.ts';
 import { registerStudyRoutes } from './study-routes.ts';
 import { registerSyncRoutes } from './sync-routes.ts';
+import { registerStatusRoutes } from './status-routes.ts';
 import { registerExportRoutes } from './export-routes.ts';
 import type { Authenticated } from '../identity/sessions.ts';
 import { authenticate } from '../identity/sessions.ts';
@@ -141,7 +142,8 @@ export async function buildApp(input: AppDeps): Promise<FastifyInstance> {
   registerProgressRoutes(app, deps);
   registerScheduleRoutes(app, deps);
   registerReminderRoutes(app, deps);
-  registerAssistantRoutes(app, deps, hub);
+  const assistant = registerAssistantRoutes(app, deps, hub);
+  registerStatusRoutes(app, deps, assistant);
   registerSyncRoutes(app, deps);
   registerExportRoutes(app, deps);
 

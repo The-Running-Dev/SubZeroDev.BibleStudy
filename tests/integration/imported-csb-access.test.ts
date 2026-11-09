@@ -107,3 +107,45 @@ test('imported content needs neither a configured owner nor group membership; ob
     }
   } finally { h.config.ownerEmail = original; }
 });
+
+
+test('S19/S20 shared scripture does not grant operational or assistant access, even after ownership is revoked', async () => {
+  // OWNER_EMAIL is absent and the obsolete disabled mode is present: only persisted membership
+  // authorizes operations. Scripture remains shared regardless of either setting.
+  const privateRecipient = 'private-operations@example.test';
+  const jobId = randomUUID();
+  await h.db.query(`INSERT INTO email_jobs (id, kind, idempotency_key, to_address, subject, text_body, html_body, status, attempts, next_attempt_at, created_at, last_error)
+    VALUES ($1, 'reminder', $1::text, $2, 'Private', 'Private', '<p>Private</p>', 'failed', 1, $3, $3, '550 private error')`,
+    [jobId, privateRecipient, h.clock.now()]);
+  assert.equal((await get('/api/owner/status')).statusCode, 401);
+  const ownerConfig = h.config.ownerEmail;
+  try {
+    for (const configuredOwner of [null, 'unrelated@example.test']) {
+      h.config.ownerEmail = configuredOwner;
+      const operational = await get('/api/owner/status', owner.cookie);
+      assert.equal(operational.statusCode, 200);
+      assert.equal(operational.json().mail.failed[0].to, privateRecipient);
+      for (const user of [owner, solo, member]) {
+        assert.equal((await get(chapterUrl, user.cookie)).json().verses[0].text, importedText);
+        assert.equal((await get(`${chapterUrl}/download-manifest`, user.cookie)).statusCode, 200);
+        assert.equal((await get('/api/assistant/status', user.cookie)).json().state, 'not_permitted');
+      }
+      for (const user of [solo, member]) {
+        for (const method of ['GET', 'HEAD'] as const) {
+          for (const url of ['/api/owner/status', '/%61pi/owner/status?role=owner']) {
+            const denied = await h.app.inject({ method, url, cookies: { bs_session: user.cookie }, headers: { 'if-none-match': '*' } });
+            assert.equal(denied.statusCode, 403);
+            assert.equal(denied.headers['cache-control'], 'no-store');
+            assert.doesNotMatch(denied.body, /private-operations|private error|counts|connector/);
+          }
+        }
+      }
+    }
+    await h.db.query('UPDATE memberships SET removed_at = $1 WHERE user_id = $2', [h.clock.now(), owner.userId]);
+    const formerOwner = await get('/api/owner/status', owner.cookie);
+    assert.equal(formerOwner.statusCode, 403);
+    assert.doesNotMatch(formerOwner.body, /private-operations|counts|connector/);
+    assert.equal((await get(chapterUrl, owner.cookie)).json().verses[0].text, importedText);
+    assert.equal((await get(`${chapterUrl}/download-manifest`, owner.cookie)).statusCode, 200);
+  } finally { h.config.ownerEmail = ownerConfig; }
+});

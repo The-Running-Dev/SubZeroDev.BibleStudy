@@ -325,3 +325,18 @@ Acceptance:
   - S19.4 Unscoped imports can be downloaded and read offline; valid legacy scoped copies also remain readable. Device storage stays keyed by account. Existing private-data and assistant-use permissions remain intact.
   - S19.5 Record supplied scraped-XML provenance without a legal determination or licence-document engineering gate. Verify deployed revision separately from CI. See ADR-0004.
 Out of scope: anonymous public content routes, changing group controls or private-data permissions, recalling exported files, deploying outside the established merge workflow.
+
+## S20 — Inspect owner operational status
+Status: implemented; validation recorded in the pull request
+Delivers: The active owner of the one v1 group can open Account → Operational status and inspect retained delivery failures, active retries and the assistant connector without an external monitoring service. S18 remains complete and unchanged.
+Touches: mail read-only status projection, assistant link-state projection, authenticated owner route, client account panel, focused integration and browser tests
+Depends on: S1, S4, S6, S11
+Acceptance:
+  - S20.1 `GET /api/owner/status` requires a valid session and an active persisted owner membership before operational records are read. Ordinary members, ungrouped users, assistant-only users and former owners get 403; anonymous callers get 401. Hiding the Account control is supplementary.
+  - S20.2 Permanent failures, retrying queued/sending jobs, first-attempt queues/sends, relay-accepted jobs and suppressed reminders are distinct. A real worker's transient error schedules a retry; 5xx and retry exhaustion are terminal. Empty lists explicitly show no records. The worker is unchanged.
+  - S20.3 The owner sees job ID, kind, recipient, attempts, creation time, next scheduled attempt and fixed safe failure guidance. The API never selects bodies, sealed secrets, idempotency keys or provider IDs; it never returns raw SMTP error text or connector configuration, runtime IDs, provider, sandbox or paths. Hostile SMTP text is covered by tests.
+  - S20.4 Connector state is online only after the existing link's hello, offline after disconnect, and not configured when either required setting is missing. Reuse the assistant's existing link and heartbeat; operational access does not grant assistant permission. No provider probe is implied.
+  - S20.5 Responses are `no-store`, lists are capped at the newest 50 per category with full retained totals, and timestamps identify the snapshot. Refresh drops old records; errors and loss of authorization display unavailable rather than an empty healthy state. The panel fits a 320 px screen at 200 % text.
+  - S20.6 Shared imported-CSB reading/downloads remain available to members, solo readers and former owners while operational records remain owner-only; missing or mismatched `OWNER_EMAIL` does not change either boundary. See ADR-0005.
+Evidence: `tests/unit/mail-status.test.ts`, `tests/integration/status.test.ts`, `tests/e2e/status.test.ts`. Local/CI validation and any live checks are reported separately in the pull request.
+Out of scope: S18 handover repetition, changing delivery/retry/authentication/connector/deployment behavior, resend controls, import management, monitoring subscriptions, paging and unrelated administration. Import manifests remain available through the existing import workflow, outside this slice.

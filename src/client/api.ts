@@ -10,6 +10,7 @@ import type {
   GroupView,
   InvitationView,
   OccurrenceView,
+  OwnerStatus,
   ReminderPreference,
   ScheduleRequest,
   UpdateOccurrenceRequest,
@@ -70,6 +71,7 @@ async function call<T>(method: string, url: string, body?: unknown, keepalive = 
 }
 
 export const api = {
+  ownerStatus: () => call<OwnerStatus>('GET', '/api/owner/status'),
   requestCode: (email: string, invitationToken?: string) => call<RequestCodeResponse>('POST', '/api/auth/code', { email, invitationToken }),
   verifyCode: (email: string, code: string, invitationToken?: string) =>
     call<VerifyCodeResponse>('POST', '/api/auth/verify', { email, code, invitationToken }),
