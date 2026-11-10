@@ -507,3 +507,26 @@ export type ConnectorToServer =
   | { t: 'resumed'; conversationId: Uuid; sessionFound: boolean; activeRuntimeTurnId: string | null }
   | { t: 'failed'; turnId: Uuid; reason: string; retryable: false }
   | { t: 'pong' };
+
+// S20: operational data is served only to the active owner of the one v1 group.
+export type ConnectorStatus = { state: 'not_configured' } | { state: 'online' } | { state: 'offline'; since: IsoInstant | null };
+export interface OperationalEmail {
+  id: Uuid;
+  kind: 'login_code' | 'reminder';
+  to: string;
+  state: 'failed' | 'retrying' | 'sending_retry';
+  attempts: number;
+  createdAt: IsoInstant;
+  nextAttemptAt: IsoInstant | null;
+  failure: { summary: string; action: string };
+}
+export interface OwnerStatus {
+  checkedAt: IsoInstant;
+  assistant: ConnectorStatus;
+  mail: {
+    counts: { failed: number; retrying: number; queued: number; sending: number; sent: number; suppressed: number };
+    failed: OperationalEmail[];
+    retrying: OperationalEmail[];
+    limit: number;
+  };
+}

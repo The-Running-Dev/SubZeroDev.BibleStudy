@@ -81,6 +81,10 @@ To read and listen with no connection, open a chapter, choose **Download for off
 
 [docs/handover.md](docs/handover.md) lists how each requirement was checked, the checks not yet performed, and the remaining limitations.
 
+## Owner operational status
+
+Open your Account menu, then **Operational status** to inspect retained email failures, scheduled retries and the study assistant connector. Access is restricted on the server to the active group owner. See [the operating notes](docs/operational-status.md) for fields, safe failure guidance and limits.
+
 ## Integration and browser tests
 
 `npm run test:integration` runs against the Postgres and Mailpit from `npm run dev:services` and empties their tables, so re-import afterwards. Override them with `TEST_DATABASE_URL`, `TEST_SMTP_URL` and `TEST_MAILPIT_URL`. The content tests import Romans from the live AO Lab API (`AOLAB_BASE_URL` overrides it), so they need network access; import failures and retries are tested against a local fixture server.
