@@ -4,9 +4,12 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ## Open
 - Which real phones run the device checks (DOD-23, DOD-28, DOD-29).
-- Whether `biblestudy.subzerodev.com` is the hostname, and who adds its DNS record and proxy route.
 
 ---
+
+### 2026-11-10 — The hostname is biblestudy.subzerodev.com
+- **Context:** The open question of the hostname, and who adds its DNS record and proxy route, was settled by the deployment itself.
+- **Chosen:** `biblestudy.subzerodev.com`, with the DNS record and the reverse-proxy route to `biblestudy-app:3000` added by the owner. It is the `PUBLIC_URL` repository variable, and it served build `9d58860` with `/__health` 200 on 2026-11-10.
 
 ### 2026-11-10 — Reconcile S20 with shared imported-CSB access
 - **Context:** S19 merged in PR #27 while S20 remained draft in PR #26. Both allocated ADR-0004; only the S20 draft record is renumbered to ADR-0005. The historical imported-content decisions remain intact.

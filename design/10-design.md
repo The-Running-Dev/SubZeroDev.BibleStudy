@@ -349,7 +349,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
   - a named media volume;
   - a one-shot `migrate` service that the app waits on;
   - a `backup` service: a nightly `pg_dump` plus a media manifest, with a shared deduplicated store for recordings and a restore that checks every checksum first (`docs/deploy.md`).
-- The stack joins the existing `proxy-net`, and the existing reverse proxy terminates TLS for the app hostname (proposed: `biblestudy.subzerodev.com`).
+- The stack joins the existing `proxy-net`, and the existing reverse proxy terminates TLS for the app hostname, `biblestudy.subzerodev.com`.
 - Migrations run in the `migrate` service, each in one transaction, before the new app starts. Compose stops the old app before it waits on `migrate`, so a failed migration leaves the site down, with nothing applied, until the previous image is redeployed by pinning `BIBLESTUDY_IMAGE` (the drill checks both). The app also migrates on start, before the listener opens, and exits non-zero if that fails, so it never serves a half-migrated schema.
 - `/__build-id` reports the commit for deploy verification. `/__health` runs `SELECT 1` and is the image's health check.
 
@@ -569,5 +569,4 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 ## Open questions
 
 - Which real phones run the device checks (an iPhone with its iOS and Safari version, and an Android phone with its Chrome version)? DOD-23, DOD-28 and DOD-29 cannot pass without them.
-- Is `biblestudy.subzerodev.com` the hostname, and does the owner add its DNS record and reverse-proxy route, or should another name be used?
 - When the owner's later voice solution arrives, does it live inside this app or alongside it? This only matters after v1. Nothing in v1 depends on it, and the WebSocket channel leaves room for either.
