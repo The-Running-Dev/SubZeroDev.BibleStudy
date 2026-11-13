@@ -8,6 +8,12 @@ $global:EsvDownloaderTestState = @{}
 $global:EsvDownloaderTestState.Requests = [System.Collections.Generic.List[object]]::new()
 $global:EsvDownloaderTestState.Pauses = [System.Collections.Generic.List[double]]::new()
 $global:EsvDownloaderTestState.Responses = [System.Collections.Generic.Queue[object]]::new()
+$global:EsvDownloaderTestState.FileFailures = 0
+$global:EsvDownloaderTestState.FileFailureSuffix = ''
+$global:EsvDownloaderTestState.Moves = [System.Collections.Generic.List[string]]::new()
+$global:EsvDownloaderTestState.HeldLock = $null
+$global:EsvDownloaderTestState.LockSource = $false
+$global:EsvDownloaderTestState.ReleaseOnPause = $false
 $fixture = @'
 <!doctype html><html><body>
 <span class="verse" data-ref="39004006">Previous book.</span>
@@ -25,14 +31,34 @@ function Assert($Condition, [string] $Message) {
 function Start-Sleep {
     param([double] $Milliseconds = 0, [double] $Seconds = 0)
     $global:EsvDownloaderTestState.Pauses.Add($Milliseconds + 1000 * $Seconds)
+    if ($global:EsvDownloaderTestState.ReleaseOnPause -and $null -ne $global:EsvDownloaderTestState.HeldLock -and $Milliseconds -eq 1000) {
+        $global:EsvDownloaderTestState.HeldLock.Dispose()
+        $global:EsvDownloaderTestState.HeldLock = $null
+    }
 }
 function Invoke-WebRequest {
     param($Uri, $UserAgent, $WebSession, $OutFile, [switch] $PassThru, [switch] $SkipHttpErrorCheck, $TimeoutSec)
     $global:EsvDownloaderTestState.Requests.Add([pscustomobject]@{ Uri = $Uri; UserAgent = $UserAgent })
     if ($global:EsvDownloaderTestState.Responses.Count -eq 0) { throw 'Unexpected network request.' }
     $response = $global:EsvDownloaderTestState.Responses.Dequeue()
-    [System.IO.File]::WriteAllText($OutFile, $response.Body)
-    return [pscustomobject]@{ StatusCode = $response.Status; Headers = $response.Headers }
+    if ($global:EsvDownloaderTestState.LockSource) {
+        # The invoked mock inherits the downloader's current temporaryStem.
+        $global:EsvDownloaderTestState.HeldLock = [IO.File]::Open($temporaryStem + '.source.html', 'CreateNew', 'ReadWrite', 'None')
+    }
+    if ($OutFile) { [System.IO.File]::WriteAllText($OutFile, $response.Body) }
+    return [pscustomobject]@{ StatusCode = $response.Status; Headers = $response.Headers
+        RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($response.Body)) }
+}
+function Move-Item {
+    param($LiteralPath, $Destination, [switch] $Force)
+    $global:EsvDownloaderTestState.Moves.Add($LiteralPath)
+    $matchesSuffix = $LiteralPath.EndsWith($global:EsvDownloaderTestState.FileFailureSuffix)
+    if ($global:EsvDownloaderTestState.FileFailureSuffix -eq '.html' -and $LiteralPath.EndsWith('.source.html')) { $matchesSuffix = $false }
+    if ($global:EsvDownloaderTestState.FileFailures -gt 0 -and $matchesSuffix) {
+        $global:EsvDownloaderTestState.FileFailures--
+        throw [IO.IOException]::new('Fixture sharing violation: file in use.')
+    }
+    Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
 }
 function Queue-Response([int] $Status = 200, [string] $Body = $fixture, [hashtable] $Headers = @{}) {
     $global:EsvDownloaderTestState.Responses.Enqueue([pscustomobject]@{ Status = $Status; Body = $Body; Headers = $Headers })
@@ -63,6 +89,10 @@ Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count) 'resume withou
 Queue-Response
 Invoke-Fixture 'valid'
 Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count + 1) 'replace a saved chapter whose checksum failed'
+Remove-Item -LiteralPath ($stem + '.html')
+Queue-Response
+Invoke-Fixture 'valid'
+Assert (Test-Path -LiteralPath ($stem + '.html')) 'repair a missing generated file'
 
 $sourceHash = (Get-FileHash -LiteralPath ($stem + '.source.html')).Hash
 Queue-Response -Body '<html><body>Unavailable</body></html>'
@@ -121,4 +151,67 @@ try { & $downloader -OutputDirectory (Join-Path $testRoot 'invalid-scope') -Book
 Assert ($errorText -match 'only 28 chapters') 'reject invalid chapter selection'
 Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count) 'validate scope before requests'
 Assert (@(Get-ChildItem -LiteralPath $testRoot -Recurse -Filter '.esv-*').Count -eq 0) 'clean partial files after errors'
-Write-Host 'PASS: extraction, notes, headings, Unicode, resume, corruption recovery, file retention, locking, throttle, Retry-After, access denial and invalid responses.'
+
+# Fail at each publication step, including after the source has already moved.
+foreach ($suffix in '.source.html', '.html', '.json') {
+    $global:EsvDownloaderTestState.FileFailureSuffix = $suffix
+    $global:EsvDownloaderTestState.FileFailures = 1
+    $count = $global:EsvDownloaderTestState.Requests.Count
+    Queue-Response
+    $folder = 'local-retry-' + $suffix.TrimStart('.')
+    $log = Invoke-Fixture $folder 3 *>&1 | Out-String
+    Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count + 1) "retry $suffix publication without another HTTP request"
+    Assert (Test-Path (Join-Path $testRoot "$folder/40-Matthew/001.json")) "complete $suffix publication after a transient failure"
+    Assert ($log -match 'LOCAL.*operation=Move' -and $log -match 'source=' -and $log -match 'destination=' -and
+        $log -match 'IOException' -and $log -match 'HResult=' -and $log -match 'attempt=1/5' -and
+        $log -match 'LOCAL RECOVERED') 'log operation, both paths, exception, attempt and recovery'
+}
+$global:EsvDownloaderTestState.FileFailureSuffix = '.json'
+$global:EsvDownloaderTestState.FileFailures = 10
+$count = $global:EsvDownloaderTestState.Requests.Count
+Queue-Response
+$errorText = ''
+try { Invoke-Fixture 'local-exhausted' 3 } catch { $errorText = $_.Exception.Message }
+Assert ($errorText -match 'Stopped at Matthew 1' -and $errorText -match 'Local file operation') 'stop when local retries are exhausted'
+Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count + 1) 'exhausted local retries never trigger another HTTP request'
+Assert (-not (Test-Path (Join-Path $testRoot 'local-exhausted/40-Matthew/001.json'))) 'never mark an interrupted save complete'
+Assert (@(Get-ChildItem -LiteralPath (Join-Path $testRoot 'local-exhausted') -Recurse -Filter '.esv-*.json').Count -eq 1) 'retain unpublished files for diagnosis after exhausted retries'
+$global:EsvDownloaderTestState.FileFailures = 0
+
+if ($IsWindows) {
+    # Actual Windows sharing violations exercise writes and resume reads, rather
+    # than only injected exceptions at publication. Release during the local wait.
+    $global:EsvDownloaderTestState.LockSource = $true
+    $global:EsvDownloaderTestState.ReleaseOnPause = $true
+    Queue-Response
+    $count = $global:EsvDownloaderTestState.Requests.Count
+    try { $log = Invoke-Fixture 'real-lock' 3 *>&1 | Out-String }
+    finally {
+        $global:EsvDownloaderTestState.LockSource = $false
+        if ($null -ne $global:EsvDownloaderTestState.HeldLock) { $global:EsvDownloaderTestState.HeldLock.Dispose() }
+    }
+    Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count + 1) 'an actual locked source write recovers with one HTTP request'
+    Assert ($log -match 'operation=Write source' -and $log -match 'HResult=80070020' -and $log -match 'LOCAL RECOVERED') 'identify an actual Windows sharing violation'
+
+    $lockedJson = Join-Path $testRoot 'real-lock/40-Matthew/001.json'
+    $global:EsvDownloaderTestState.HeldLock = [IO.File]::Open($lockedJson, 'Open', 'ReadWrite', 'None')
+    $count = $global:EsvDownloaderTestState.Requests.Count
+    try { $log = Invoke-Fixture 'real-lock' 3 *>&1 | Out-String }
+    finally { if ($null -ne $global:EsvDownloaderTestState.HeldLock) { $global:EsvDownloaderTestState.HeldLock.Dispose() } }
+    Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count) 'a locked saved JSON read recovers without treating the chapter as corrupt'
+    Assert ($log -match 'operation=Read JSON' -and $log -match 'SKIP Matthew 1') 'log and recover a resume read'
+
+    $global:EsvDownloaderTestState.HeldLock = [IO.File]::Open((Join-Path $testRoot 'real-lock/40-Matthew/001.source.html'), 'Open', 'ReadWrite', 'None')
+    try { $log = Invoke-Fixture 'real-lock' 3 *>&1 | Out-String }
+    finally { if ($null -ne $global:EsvDownloaderTestState.HeldLock) { $global:EsvDownloaderTestState.HeldLock.Dispose() } }
+    Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count) 'a locked hash read recovers without another HTTP request'
+    Assert ($log -match 'operation=Hash' -and $log -match 'LOCAL RECOVERED') 'identify the failing hash operation'
+
+    $global:EsvDownloaderTestState.ReleaseOnPause = $false
+    $global:EsvDownloaderTestState.HeldLock = [IO.File]::Open($lockedJson, 'Open', 'ReadWrite', 'None')
+    $errorText = ''
+    try { Invoke-Fixture 'real-lock' 3 *>&1 | Out-Null } catch { $errorText = $_.Exception.Message }
+    finally { $global:EsvDownloaderTestState.HeldLock.Dispose(); $global:EsvDownloaderTestState.HeldLock = $null }
+    Assert ($errorText -match 'Local file operation failed' -and $global:EsvDownloaderTestState.Requests.Count -eq $count) 'an exhausted resume read stops without another HTTP request'
+}
+Write-Host 'PASS: extraction, resume, corruption recovery, file retention, local retries without repeat requests, operation diagnostics, throttling and HTTP error handling.'
