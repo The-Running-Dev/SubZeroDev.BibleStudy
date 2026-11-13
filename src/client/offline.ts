@@ -441,10 +441,17 @@ export interface DownloadSummary extends ChapterRef {
   expired: boolean;
 }
 
-export async function listDownloads(userId: Uuid): Promise<DownloadSummary[]> {
+export const downloadsChangedEvent = 'biblestudy:downloads-changed';
+
+export function notifyDownloadsChanged(): void {
+  window.dispatchEvent(new Event(downloadsChangedEvent));
+}
+
+export async function listDownloads(userId: Uuid, onlyTranslation?: TranslationId): Promise<DownloadSummary[]> {
   if (!storageAvailable()) return [];
   const kept: DownloadSummary[] = [];
   for (const record of await allRecords(userId)) {
+    if (onlyTranslation && record.translationId !== onlyTranslation) continue;
     const expired = isExpired(record);
     if (expired) await expire(record);
     else if (await evicted(record)) continue;
