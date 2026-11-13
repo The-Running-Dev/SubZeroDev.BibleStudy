@@ -119,7 +119,7 @@ function ConvertTo-PlainText([string] $Html) {
     return ([regex]::Replace([System.Net.WebUtility]::HtmlDecode($text), '\s+', ' ')).Trim()
 }
 
-function Get-Annotations([string] $Html, [string] $Kind) {
+function Get-Annotations([string] $Html, [string] $Kind, [string] $SourceUrl) {
     foreach ($m in [regex]::Matches($Html, '(?is)<sup\b[^>]*class=["''][^"'']*\b' + $Kind + '\b[^"'']*["''][^>]*>(.*?)</sup>')) {
         $anchor = [regex]::Match($m.Groups[1].Value, '(?is)<a\b[^>]*>')
         if (-not $anchor.Success) { throw "A $Kind annotation has no link; page markup may have changed." }
@@ -129,7 +129,7 @@ function Get-Annotations([string] $Html, [string] $Kind) {
             Marker = ConvertTo-PlainText $m.Groups[1].Value
             Text = ConvertTo-PlainText (Get-HtmlAttribute $tag 'title')
             Passage = Get-HtmlAttribute $tag 'data-passage'
-            Href = if ($href) { ([uri]::new([uri]'https://www.esv.org/', $href)).AbsoluteUri } else { '' }
+            Href = if ($href) { ([uri]::new([uri]$SourceUrl, $href)).AbsoluteUri } else { '' }
         }
     }
 }
@@ -152,8 +152,8 @@ function ConvertFrom-ChapterHtml([string] $Html, [int] $Number, [string] $Name, 
             $pendingHeadings.Add([pscustomobject]@{
                 Level = [int]$Matches[1]
                 Text = ConvertTo-PlainText $token.Value
-                CrossReferences = @(Get-Annotations $token.Value 'crossref')
-                Footnotes = @(Get-Annotations $token.Value 'footnote')
+                CrossReferences = @(Get-Annotations $token.Value 'crossref' $SourceUrl)
+                Footnotes = @(Get-Annotations $token.Value 'footnote' $SourceUrl)
             })
             continue
         }
@@ -188,8 +188,8 @@ function ConvertFrom-ChapterHtml([string] $Html, [int] $Number, [string] $Name, 
                         Number = [int]$reference.Substring(5)
                         Reference = $reference
                         Text = $text
-                        Footnotes = @(Get-Annotations $fragment 'footnote')
-                        CrossReferences = @(Get-Annotations $fragment 'crossref')
+                        Footnotes = @(Get-Annotations $fragment 'footnote' $SourceUrl)
+                        CrossReferences = @(Get-Annotations $fragment 'crossref' $SourceUrl)
                     }
                 }
                 else {
@@ -197,8 +197,8 @@ function ConvertFrom-ChapterHtml([string] $Html, [int] $Number, [string] $Name, 
                     $gap = $Html.Substring($previousEnd, $start - $previousEnd)
                     $separator = if ($gap -match '(?i)</?p\b|<br\b|</?section\b') { "`n" } else { ' ' }
                     $verses[$reference].Text += $separator + $text
-                    $verses[$reference].Footnotes += @(Get-Annotations $fragment 'footnote')
-                    $verses[$reference].CrossReferences += @(Get-Annotations $fragment 'crossref')
+                    $verses[$reference].Footnotes += @(Get-Annotations $fragment 'footnote' $SourceUrl)
+                    $verses[$reference].CrossReferences += @(Get-Annotations $fragment 'crossref' $SourceUrl)
                 }
             }
             $previousEnd = $token.Index + $token.Length

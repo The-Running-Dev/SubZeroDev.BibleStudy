@@ -48,6 +48,7 @@ $document = Get-Content -LiteralPath ($stem + '.json') -Raw | ConvertFrom-Json
 Assert ($document.VerseCount -eq 2) 'exclude neighboring books and chapters'
 Assert ($document.Verses[0].Text -eq ('First & “quoted” LORD line.' + "`nSecond line.")) 'merge nested spans, Unicode and poetry without note markers'
 Assert ($document.Verses[0].Footnotes[0].Text -eq 'Or alternative') 'decode embedded footnote HTML'
+Assert ($document.Verses[0].Footnotes[0].Href -eq 'https://www.esv.org/Matthew+1/#f1') 'resolve footnote links against their chapter URL'
 Assert ($document.Verses[0].CrossReferences[0].Passage -eq 'John 1:1') 'preserve cross-reference target'
 Assert ($document.Headings.Count -eq 3 -and $document.Headings[2].BeforeVerse -eq 2) 'retain headings and superscription only for the target chapter'
 Assert ((Get-Content -LiteralPath ($stem + '.html') -Raw) -match 'First &amp;') 'escape generated HTML'
