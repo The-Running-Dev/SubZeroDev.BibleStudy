@@ -492,3 +492,7 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 ## D-2026-11-13-02 — Save the entire ESV Bible for offline reading
 - **Context:** the owner requested a single option to download all ESV chapters to the device.
 - **Chosen:** a sequential, resumable client download of the canonical 1,189 chapters from the app's existing stored content. Reuse per-chapter integrity checks and per-account storage, skip valid saved copies, retain progress after interruptions, and verify the entire set before reporting completion. See [ADR-0006](../docs/decisions/0006-esv-offline-bible.md).
+
+## D-2026-11-13-03 — Offer whole-Bible downloads for BSB and CSB too
+- **Context:** the owner requested the same entire-Bible offline option for BSB and CSB.
+- **Chosen:** generalize the ESV downloader to the selected translation, keeping progress and storage separate for each translation and account. Switching translations pauses active work; Resume rechecks saved copies. Preserve existing CSB expiry behavior and per-chapter narration downloads. See [ADR-0007](../docs/decisions/0007-whole-bible-offline.md).
