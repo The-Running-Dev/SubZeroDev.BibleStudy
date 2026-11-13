@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { bookById } from '../shared/books.ts';
 import { messageFor } from './api.ts';
-import { downloadChapter, downloadManifest, downloadState, formatBytes, listDownloads, removeDownload, storageAvailable } from './offline.ts';
+import { downloadChapter, downloadManifest, downloadsChangedEvent, downloadState, formatBytes, listDownloads, notifyDownloadsChanged, removeDownload, storageAvailable } from './offline.ts';
 import type { ChapterRef, DownloadState, DownloadSummary } from './offline.ts';
 
 const label = (ref: ChapterRef) => `${bookById(ref.bookId)?.name ?? ref.bookId} ${ref.chapter} (${ref.translationId})`;
@@ -22,12 +22,18 @@ export function Download(props: { userId: string; at: ChapterRef; narrated: bool
     let current = true;
     setOpen(false);
     setSizes(null);
-    downloadState(userId, at)
-      .then((s) => current && setState(s))
-      .catch(() => current && setState({ state: 'absent' }));
+    const refresh = () => {
+      if (abort.current) return;
+      void downloadState(userId, at)
+        .then((s) => current && !abort.current && setState(s))
+        .catch(() => current && !abort.current && setState({ state: 'absent' }));
+    };
+    refresh();
+    window.addEventListener(downloadsChangedEvent, refresh);
     return () => {
       current = false;
       abort.current?.abort();
+      window.removeEventListener(downloadsChangedEvent, refresh);
     };
     // `at` is a new object each render; the key names the chapter.
   }, [userId, key]);
@@ -64,11 +70,13 @@ export function Download(props: { userId: string; at: ChapterRef; narrated: bool
     });
     abort.current = null;
     setState(result);
+    if (result.state === 'ready') notifyDownloadsChanged();
   }
 
   async function remove() {
     await removeDownload(userId, at);
     setState({ state: 'absent' });
+    notifyDownloadsChanged();
   }
 
   const percent = state.state === 'downloading' && state.totalBytes > 0 ? Math.floor((state.doneBytes / state.totalBytes) * 100) : 0;
@@ -154,11 +162,14 @@ export function DownloadsList(props: { userId: string }) {
 
   useEffect(() => {
     let current = true;
-    listDownloads(props.userId)
+    const refresh = () => void listDownloads(props.userId)
       .then((list) => current && setItems(list))
       .catch(() => current && setItems([]));
+    refresh();
+    window.addEventListener(downloadsChangedEvent, refresh);
     return () => {
       current = false;
+      window.removeEventListener(downloadsChangedEvent, refresh);
     };
   }, [props.userId]);
 
@@ -167,6 +178,7 @@ export function DownloadsList(props: { userId: string }) {
   async function remove(item: DownloadSummary) {
     await removeDownload(props.userId, item);
     setItems((all) => all?.filter((i) => i !== item) ?? null);
+    notifyDownloadsChanged();
   }
 
   return (

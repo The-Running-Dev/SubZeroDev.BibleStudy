@@ -44,7 +44,7 @@ A private Bible-study app for a small group: shared narrated reading, questions 
    ```bash
    node --env-file=.env src/server/content/import-cli.ts --translation ESV --from bibles/ESV
    ```
-   The folder contains `NN-Book/NNN.json` files produced by `scripts/Download-ESVBible.ps1`. The import stores ESV in Postgres for every signed-in reader, preserving verse numbers, headings, footnotes and cross-references. Select **ESV** in the reader; **Download for offline** saves chapters on that device. No API key or further ESV.org requests are needed. The source files stay outside git and the image. See [the ESV decision](docs/decisions/0005-local-esv.md).
+   The folder contains `NN-Book/NNN.json` files produced by `scripts/Download-ESVBible.ps1`. The import stores ESV in Postgres for every signed-in reader, preserving verse numbers, headings, footnotes and cross-references. Select **ESV** in the reader, then **Download entire ESV Bible** to save all 1,189 chapters on that device. Keep the page open until it finishes. You can pause and resume; reopening the app skips valid chapters already saved. Text, headings and notes are included. Individual chapters can still be saved with **Download for offline** and removed from the account's downloads list. Browser storage can be cleared by the device; resume the download to replace missing or damaged chapters. No API key or further ESV.org requests are needed. The source files stay outside git and the image. See [the ESV decision](docs/decisions/0005-local-esv.md) and [the whole-Bible download decision](docs/decisions/0006-esv-offline-bible.md).
 
 6. **Import narration (optional)**
    ```bash

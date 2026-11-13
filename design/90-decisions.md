@@ -488,3 +488,7 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 - **Context:** the owner requested a one-time import of the downloaded ESV Bible into the existing app, selectable for local use without API keys.
 - **Chosen:** extend the translation catalog, stored chapter importer, personal data and study sessions to ESV. Import the private `NN-Book/NNN.json` files once into Postgres and use existing per-account device downloads for offline reading. Preserve the downloaded verse numbering, headings, footnotes and cross-references. ESV has no narration source.
 - **Departure:** the original two-translation BSB/CSB contract now also supports ESV. See [ADR-0005](../docs/decisions/0005-local-esv.md).
+
+## D-2026-11-13-02 — Save the entire ESV Bible for offline reading
+- **Context:** the owner requested a single option to download all ESV chapters to the device.
+- **Chosen:** a sequential, resumable client download of the canonical 1,189 chapters from the app's existing stored content. Reuse per-chapter integrity checks and per-account storage, skip valid saved copies, retain progress after interruptions, and verify the entire set before reporting completion. See [ADR-0006](../docs/decisions/0006-esv-offline-bible.md).
