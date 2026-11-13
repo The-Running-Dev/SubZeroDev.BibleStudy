@@ -43,6 +43,11 @@ jobs:
           cache: npm
 
       # verification: true
+      - name: ESV downloader fixtures (no network)
+        shell: pwsh
+        run: ./scripts/Test-ESVDownloader.ps1
+
+      # verification: true
       - name: Install
         run: npm ci
 
