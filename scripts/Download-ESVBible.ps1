@@ -8,6 +8,9 @@ before each request. Starts with Matthew, continues through Revelation, then
 Genesis through Malachi. Saves the original response (.source.html), a standalone
 chapter (.html), and structured verses, headings, notes and references (.json).
 Valid saved chapters are skipped. JSON is written last as the completion marker.
+Local file operations retry independently of HTTP requests (five attempts by
+default). Failures log UTC time, operation, full paths, exception and HResult.
+Exhausted local retries stop the run and retain unpublished files for diagnosis.
 Run again after an interruption to resume. No external modules are needed.
 Stops on access denial or exhausted rate-limit retries; never works around a block.
 Downloaded content stays under the repository's ignored bibles directory by default.
@@ -25,6 +28,8 @@ param(
     [ValidateRange(1, 66)] [int[]] $Book = @((40..66) + (1..39)),
     [ValidateRange(1, 150)] [int[]] $Chapter,
     [ValidateRange(1, 5)] [int] $MaxAttempts = 3,
+    [ValidateRange(1, 10)] [int] $LocalFileAttempts = 5,
+    [ValidateRange(100, 10000)] [int] $LocalRetryDelayMilliseconds = 1000,
     [ValidateRange(1000, 60000)] [int] $DelayMilliseconds = 5000,
     [ValidateRange(0, 60000)] [int] $JitterMilliseconds = 3000,
     [switch] $Force
@@ -256,8 +261,50 @@ function ConvertTo-LocalHtml($Document) {
     return $body.ToString()
 }
 
+function Invoke-LocalFileOperation([string] $Operation, [string] $Path, [scriptblock] $Action, [string] $Destination = '') {
+    for ($fileAttempt = 1; $fileAttempt -le $LocalFileAttempts; $fileAttempt++) {
+        try {
+            $result = & $Action
+            if ($fileAttempt -gt 1) {
+                Write-Host "LOCAL RECOVERED utc=$([datetimeoffset]::UtcNow.ToString('o')) operation=$Operation source='$Path' destination='$Destination' attempt=$fileAttempt/$LocalFileAttempts"
+            }
+            return $result
+        }
+        catch {
+            $cause = $_.Exception.GetBaseException()
+            $details = "operation=$Operation source='$Path' destination='$Destination' attempt=$fileAttempt/$LocalFileAttempts exception=$($cause.GetType().FullName) HResult=$('{0:X8}' -f $cause.HResult) message=$($cause.Message)"
+            Write-Warning "LOCAL utc=$([datetimeoffset]::UtcNow.ToString('o')) $details stack=$($_.ScriptStackTrace)"
+            if ($fileAttempt -eq $LocalFileAttempts -or
+                ($cause -isnot [IO.IOException] -and $cause -isnot [UnauthorizedAccessException])) {
+                $failure = [IO.IOException]::new("Local file operation failed: $details", $_.Exception)
+                $failure.Data['EsvLocalFileFailure'] = $true
+                throw $failure
+            }
+            $wait = [math]::Min(10000, $LocalRetryDelayMilliseconds * $fileAttempt)
+            Write-Host "LOCAL WAIT $wait milliseconds; retrying $Operation without another HTTP request"
+            Start-Sleep -Milliseconds $wait
+        }
+    }
+}
+
+function Test-LocalFileFailure([Exception] $Exception) {
+    while ($null -ne $Exception) {
+        if ($Exception.Data.Contains('EsvLocalFileFailure')) { return $true }
+        $Exception = $Exception.InnerException
+    }
+    return $false
+}
+
+function Get-LocalFileHash([string] $Path) {
+    return (Invoke-LocalFileOperation 'Hash' $Path { Get-FileHash -LiteralPath $Path -Algorithm SHA256 }).Hash
+}
+
 function Assert-SavedChapter([string] $Stem, [int] $Number, [int] $ChapterNumber) {
-    $document = Get-Content -LiteralPath ($Stem + '.json') -Raw | ConvertFrom-Json
+    foreach ($suffix in '.source.html', '.html', '.json') {
+        if (-not (Test-Path -LiteralPath ($Stem + $suffix))) { throw "Saved chapter file is missing: '$Stem$suffix'." }
+    }
+    $jsonPath = $Stem + '.json'
+    $document = (Invoke-LocalFileOperation 'Read JSON' $jsonPath { [IO.File]::ReadAllText($jsonPath) }) | ConvertFrom-Json
     if ($document.SchemaVersion -ne 1 -or $document.Translation -ne 'ESV' -or
         $document.BookNumber -ne $Number -or $document.Chapter -ne $ChapterNumber -or
         $document.Verses.Count -lt 1 -or $document.VerseCount -ne $document.Verses.Count -or
@@ -269,8 +316,8 @@ function Assert-SavedChapter([string] $Stem, [int] $Number, [int] $ChapterNumber
             $verse.Number -le $previous -or [string]::IsNullOrWhiteSpace($verse.Text)) { throw 'Saved verse is invalid.' }
         $previous = $verse.Number
     }
-    if ((Get-FileHash -LiteralPath ($Stem + '.source.html') -Algorithm SHA256).Hash -ne $document.SourceSha256 -or
-        (Get-FileHash -LiteralPath ($Stem + '.html') -Algorithm SHA256).Hash -ne $document.HtmlSha256) {
+    if ((Get-LocalFileHash ($Stem + '.source.html')) -ne $document.SourceSha256 -or
+        (Get-LocalFileHash ($Stem + '.html')) -ne $document.HtmlSha256) {
         throw 'Saved HTML checksum mismatch.'
     }
 }
@@ -283,7 +330,7 @@ foreach ($number in $bookNumbers) {
     }
 }
 $outputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
-[void][System.IO.Directory]::CreateDirectory($outputPath)
+[void](Invoke-LocalFileOperation 'Create directory' $outputPath { [IO.Directory]::CreateDirectory($outputPath) })
 # Prevent two runs from requesting the same chapters or replacing each other's files.
 $lockPath = Join-Path $outputPath '.download.lock'
 try { $downloadLock = [System.IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
@@ -299,7 +346,7 @@ try {
     foreach ($number in $bookNumbers) {
         $entry = $catalog[$number - 1]
         $bookPath = Join-Path $outputPath ('{0:D2}-{1}' -f $number, ($entry.Name -replace ' ', '-'))
-        [void][System.IO.Directory]::CreateDirectory($bookPath)
+        [void](Invoke-LocalFileOperation 'Create directory' $bookPath { [IO.Directory]::CreateDirectory($bookPath) })
         $chapters = if ($Chapter) { @($Chapter | Sort-Object -Unique) } else { @(1..[int]$entry.Chapters) }
         foreach ($chapterNumber in $chapters) {
             $label = "$($entry.Name) $chapterNumber"
@@ -311,13 +358,17 @@ try {
                     $skipped++
                     continue
                 }
-                catch { Write-Warning "${label}: saved chapter failed validation; downloading again. $($_.Exception.Message)" }
+                catch {
+                    if (Test-LocalFileFailure $_.Exception) { throw }
+                    Write-Warning "${label}: saved chapter failed validation; downloading again. $($_.Exception.Message)"
+                }
             }
             $url = 'https://www.esv.org/' + [uri]::EscapeDataString($entry.Name).Replace('%20', '+') + '+' + $chapterNumber + '/'
             $success = $false
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
                 $temporaryStem = Join-Path $bookPath ('.esv-' + [guid]::NewGuid().ToString('N'))
                 $stopRun = $false
+                $retainTemporaryFiles = $false
                 $status = 0
                 $retrySeconds = [math]::Min(300, 15 * [math]::Pow(2, $attempt - 1))
                 try {
@@ -325,7 +376,7 @@ try {
                     Start-Sleep -Milliseconds $pause
                     Write-Host "GET  $label (attempt $attempt/$MaxAttempts)"
                     $response = Invoke-WebRequest -Uri $url -UserAgent $userAgent -WebSession $session `
-                        -OutFile ($temporaryStem + '.source.html') -PassThru -SkipHttpErrorCheck -TimeoutSec 60
+                        -SkipHttpErrorCheck -TimeoutSec 60
                     $status = [int]$response.StatusCode
                     if ($status -in 401, 403) { $stopRun = $true; throw "HTTP $status access denied; stopping requests." }
                     if ($status -eq 429) {
@@ -340,15 +391,32 @@ try {
                         throw 'HTTP 429 rate limit.'
                     }
                     if ($status -ne 200) { throw "HTTP $status." }
-                    $html = [System.IO.File]::ReadAllText($temporaryStem + '.source.html')
+                    # Buffer the response before touching disk so a sharing violation
+                    # never repeats the network request, including the initial write.
+                    $buffer = [IO.MemoryStream]::new()
+                    try {
+                        $response.RawContentStream.Position = 0
+                        $response.RawContentStream.CopyTo($buffer)
+                        $sourceBytes = $buffer.ToArray()
+                    }
+                    finally { $buffer.Dispose(); $response.RawContentStream.Dispose() }
+                    $sourcePath = $temporaryStem + '.source.html'
+                    Invoke-LocalFileOperation 'Write source' $sourcePath { [IO.File]::WriteAllBytes($sourcePath, $sourceBytes) }
+                    $html = Invoke-LocalFileOperation 'Read source' $sourcePath { [IO.File]::ReadAllText($sourcePath) }
                     $document = ConvertFrom-ChapterHtml $html $number $entry.Name $chapterNumber $url
-                    [System.IO.File]::WriteAllText($temporaryStem + '.html', (ConvertTo-LocalHtml $document))
-                    $document | Add-Member SourceSha256 (Get-FileHash -LiteralPath ($temporaryStem + '.source.html') -Algorithm SHA256).Hash
-                    $document | Add-Member HtmlSha256 (Get-FileHash -LiteralPath ($temporaryStem + '.html') -Algorithm SHA256).Hash
-                    [System.IO.File]::WriteAllText($temporaryStem + '.json', ($document | ConvertTo-Json -Depth 12))
+                    $htmlPath = $temporaryStem + '.html'
+                    $localHtml = ConvertTo-LocalHtml $document
+                    Invoke-LocalFileOperation 'Write HTML' $htmlPath { [IO.File]::WriteAllText($htmlPath, $localHtml) }
+                    $document | Add-Member SourceSha256 (Get-LocalFileHash $sourcePath)
+                    $document | Add-Member HtmlSha256 (Get-LocalFileHash $htmlPath)
+                    $jsonPath = $temporaryStem + '.json'
+                    $json = $document | ConvertTo-Json -Depth 12
+                    Invoke-LocalFileOperation 'Write JSON' $jsonPath { [IO.File]::WriteAllText($jsonPath, $json) }
                     Assert-SavedChapter $temporaryStem $number $chapterNumber
                     foreach ($suffix in '.source.html', '.html', '.json') {
-                        Move-Item -LiteralPath ($temporaryStem + $suffix) -Destination ($stem + $suffix) -Force
+                        $fromPath = $temporaryStem + $suffix
+                        $toPath = $stem + $suffix
+                        Invoke-LocalFileOperation 'Move' $fromPath { Move-Item -LiteralPath $fromPath -Destination $toPath -Force } $toPath
                     }
                     Write-Host "OK   $label ($($document.VerseCount) verses)"
                     $downloaded++
@@ -357,6 +425,11 @@ try {
                     break
                 }
                 catch {
+                    if (Test-LocalFileFailure $_.Exception) {
+                        $stopRun = $true
+                        $retainTemporaryFiles = $true
+                        Write-Warning "Retaining unpublished files at '$temporaryStem.*'; local failure will not trigger an HTTP retry."
+                    }
                     $reason = $_.Exception.Message
                     Write-Warning "${label}: $reason"
                     if ($stopRun) {
@@ -370,8 +443,14 @@ try {
                     }
                 }
                 finally {
-                    foreach ($suffix in '.source.html', '.html', '.json') {
-                        if (Test-Path -LiteralPath ($temporaryStem + $suffix)) { Remove-Item -LiteralPath ($temporaryStem + $suffix) -Force }
+                    if (-not $retainTemporaryFiles) {
+                        foreach ($suffix in '.source.html', '.html', '.json') {
+                            $cleanupPath = $temporaryStem + $suffix
+                            if (Test-Path -LiteralPath $cleanupPath) {
+                                try { Invoke-LocalFileOperation 'Remove temporary file' $cleanupPath { Remove-Item -LiteralPath $cleanupPath -Force } }
+                                catch { Write-Warning "Temporary file retained: '$cleanupPath'. $($_.Exception.Message)" }
+                            }
+                        }
                     }
                 }
             }
