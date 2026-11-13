@@ -129,7 +129,8 @@ export async function buildApp(input: AppDeps): Promise<FastifyInstance> {
     } catch {
       return reply.status(503).send({ error: 'unavailable', message: 'The database is unavailable.', retryable: true });
     }
-    return { ok: true };
+    // The commit this image was built from: the deploy waits until the running app reports the one it shipped.
+    return { ok: true, revision: config.buildId };
   });
 
   const hub = deps.hub ?? createRealtimeHub();

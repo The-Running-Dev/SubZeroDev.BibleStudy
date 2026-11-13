@@ -1,6 +1,6 @@
 # Deploying to the VPS
 
-The app runs on the owner's VPS as a Portainer Git stack defined by [compose.yaml](../compose.yaml). On every merge to `main`, GitHub Actions builds and drills the image, publishes `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`, then calls the Portainer webhook so the stack pulls the image, migrates and restarts. There is no separate deployment opt-in flag.
+The app runs on the owner's VPS as a Portainer Git stack defined by [compose.yaml](../compose.yaml). On every merge to `main`, GitHub Actions builds and drills the image, publishes `ghcr.io/the-running-dev/subzerodev.biblestudy:<sha>` and `:latest`, then starts the Infra deploy workflow (`INFRA_DISPATCH_TOKEN`) with the image digest, which redeploys the stack through Portainer and waits until `/__health` reports that commit. The `deploy` job runs only when the repository variable `DEPLOY_ENABLED` is `true`.
 
 ## The stack
 
@@ -22,8 +22,8 @@ These are account and server settings, so they are the owner's to make. Nothing 
 1. **The image is pullable.** The first run of `deploy.yml` creates the GHCR package `subzerodev.biblestudy`. Either make the package public (GitHub → the package → Package settings → Change visibility), or add GHCR as a registry in Portainer with a personal access token that has `read:packages`.
 2. **The proxy network exists** on the VPS. The stack expects `proxy-net`; set `PROXY_NETWORK` if yours is named differently. It is declared external, so the stack fails to start rather than create a network the proxy cannot reach.
 3. **The hostname resolves and is routed.** Add the DNS record for `biblestudy.subzerodev.com` and a proxy route from it to `http://biblestudy-app:3000`, with TLS terminated at the proxy. The route must pass WebSocket upgrades (`/ws`, `/connector`).
-4. **Create the stack in Portainer:** Stacks → Add stack → Repository. Repository URL `https://github.com/The-Running-Dev/SubZeroDev.BibleStudy`, reference `refs/heads/main`, compose path `compose.yaml`. Set the environment variables below. Turn on the stack webhook and copy its URL.
-5. **Configure automatic deploys:** in the repository's Settings → Secrets and variables → Actions, add the secret `PORTAINER_REDEPLOY_WEBHOOK_URL` with the webhook URL. Every merge to `main` requests deployment after the image passes its drill and is published; a missing webhook secret fails the deploy job instead of silently skipping it. `DEPLOY_ENABLED` is no longer used. Add the variable `PUBLIC_URL` = `https://<hostname>` too, and the deploy waits up to five minutes for the site to serve the merged commit, failing if it does not.
+4. **Create the stack and tunnel:** the stack, its Cloudflare tunnel and DNS record are managed by OpenTofu from [deploy/](../deploy/README.md) (Portainer Git stack on `refs/heads/main`, compose files `compose.yaml` and `compose.tunnel.yaml`). Nothing is published on the host.
+5. **Configure automatic deploys:** `deploy/` also writes `INFRA_DISPATCH_TOKEN` to the repository `production` environment and sets `DEPLOY_ENABLED`. There is no Portainer webhook. `PUBLIC_URL` = `https://<hostname>` is optional: when set, the deploy also waits up to five minutes for the site to serve the merged commit.
 6. **Import the text** once the stack is up, from the VPS shell:
 
    ```bash
@@ -130,4 +130,4 @@ It prints the manifest's row counts next to the restored database's. Into a bran
 | 2026-10-30 23:41 | Owner's PC, Docker 29.9.2, Compose 5.6.1 | built from `b3afebf` + S7 working tree | 6/6 passed. Dump 51,543 bytes, 1 media file; restored counts users 2, groups 1, memberships 2, chapters 2, recordings 1. |
 | 2026-10-31 00:05 | Owner's PC, Docker 29.9.2, Compose 5.6.1 | built from `b3afebf` + S7 review fixes | 9/9 passed. Dump 51,548 bytes, 1 media file; restored counts match; the failed deploy exited 1 with nothing applied and the rollback served the build. |
 
-The VPS itself (S7.5) is not drilled: it needs the DNS record, proxy route and webhook secret above.
+The VPS itself (S7.5) is not drilled: it needs the tunnel, DNS record and dispatch token above.

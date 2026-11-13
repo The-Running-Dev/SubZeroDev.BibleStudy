@@ -1,7 +1,9 @@
 name: Deploy
 
-# Every merge to main publishes the drilled image and asks Portainer to redeploy the stack.
-# docs/deploy.md has the webhook and hostname setup.
+# Every merge to main publishes the drilled image and asks the Infra repository's deploy workflow (D38) to
+# deploy it by digest. The Portainer credentials live only there; this repository holds INFRA_DISPATCH_TOKEN
+# (production environment), written with the rest of the stack's configuration by deploy/ (OpenTofu).
+# docs/deploy.md has the setup.
 on:
   push:
     branches: [main]
@@ -27,6 +29,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -68,25 +72,29 @@ jobs:
 
       # :<sha> is what a rollback pins; :latest is what compose.yaml pulls by default.
       - name: Publish the drilled image
+        id: publish
         run: |
           docker push "$IMAGE:$GITHUB_SHA"
           docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
           docker push "$IMAGE:latest"
+          digest="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE:$GITHUB_SHA" | grep "^$IMAGE@" | head -n1 | cut -d@ -f2)"
+          test -n "$digest" || { echo "No digest for the pushed image"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: deploy
     needs: image
-    # Every merge deploys after publication. A missing webhook secret fails visibly below.
-    if: github.ref == 'refs/heads/main'
+    # DEPLOY_ENABLED is set by deploy/ once the stack is under OpenTofu.
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    environment: production
     steps:
-      - name: Redeploy the Portainer stack
-        env:
-          REDEPLOY_WEBHOOK_URL: ${{ secrets.PORTAINER_REDEPLOY_WEBHOOK_URL }}
-        run: |
-          test -n "$REDEPLOY_WEBHOOK_URL" || { echo "PORTAINER_REDEPLOY_WEBHOOK_URL is not set"; exit 1; }
-          curl -fsS --max-time 60 -X POST "$REDEPLOY_WEBHOOK_URL" -o /dev/null
-          echo "Redeploy requested for ${{ github.sha }}"
+      # Infra validates the digest and revision, deploys it and waits until /__health reports this commit.
+      - uses: The-Running-Dev/GitHub-ActionTemplates/actions/infra-deploy@c71f9720badd37b94b96da0c77633acc3a113647 # v2.2.0
+        with:
+          app: biblestudy
+          digest: ${{ needs.image.outputs.digest }}
+          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
 
       - name: Checkout
         if: vars.PUBLIC_URL != ''
