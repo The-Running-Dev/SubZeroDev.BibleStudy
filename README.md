@@ -44,7 +44,7 @@ A private Bible-study app for a small group: shared narrated reading, questions 
    ```bash
    node --env-file=.env src/server/content/import-cli.ts --translation ESV --from bibles/ESV
    ```
-   The folder contains `NN-Book/NNN.json` files produced by `scripts/Download-ESVBible.ps1`. The import stores ESV in Postgres for every signed-in reader, preserving verse numbers, headings, footnotes and cross-references. Select **ESV** in the reader, then **Download entire ESV Bible** to save all 1,189 chapters on that device. Keep the page open until it finishes. You can pause and resume; reopening the app skips valid chapters already saved. Text, headings and notes are included. Individual chapters can still be saved with **Download for offline** and removed from the account's downloads list. Browser storage can be cleared by the device; resume the download to replace missing or damaged chapters. No API key or further ESV.org requests are needed. The source files stay outside git and the image. See [the ESV decision](docs/decisions/0005-local-esv.md) and [the whole-Bible download decision](docs/decisions/0006-esv-offline-bible.md).
+   The folder contains `NN-Book/NNN.json` files produced by `scripts/Download-ESVBible.ps1`. The import stores ESV in Postgres for every signed-in reader, preserving verse numbers, headings, footnotes and cross-references. No API key or further ESV.org requests are needed. The source files stay outside git and the image. See [the ESV decision](docs/decisions/0005-local-esv.md).
 
 6. **Import narration (optional)**
    ```bash
@@ -83,7 +83,9 @@ Installing is optional; the app works in the phone's browser. The account panel'
 - **iPhone (Safari):** open the app's address, tap **Share**, then **Add to Home Screen**, then **Add**. Open it from the new icon. An installed app on iOS keeps its own storage, so sign in again there and download chapters again.
 - **Android (Chrome):** open the app's address and tap **Install** when Chrome offers it, or open the ⋮ menu and choose **Install app** (or **Add to Home screen**). The installed app shares Chrome's storage and sign-in.
 
-To read and listen with no connection, open a chapter, choose **Download for offline**, pick text only or text with narration (the size is shown first), and wait for **Ready**.
+To save an entire Bible, select **BSB**, **CSB** or **ESV** in the reader, then choose **Download entire BSB Bible**, **Download entire CSB Bible** or **Download entire ESV Bible**. This saves all 1,189 chapters, including available headings and notes, on that device. Keep the page open until it finishes. You can pause and resume; reopening the app skips valid chapters already saved. Each translation has its own progress. Switching translations pauses the current download. Browser storage can be cleared by the device; resume to replace missing, expired or damaged chapters. Imported CSB does not expire; CSB chapters supplied through API.Bible retain their existing expiry. See [the whole-Bible download decision](docs/decisions/0007-whole-bible-offline.md).
+
+To include narration for a chapter, choose **Download for offline**, pick text with narration (the size is shown first), and wait for **Ready**. Whole-Bible downloads save text, headings and notes; narration is downloaded per chapter. Individual chapters can still be saved or removed separately.
 
 [docs/handover.md](docs/handover.md) lists how each requirement was checked, the checks not yet performed, and the remaining limitations.
 

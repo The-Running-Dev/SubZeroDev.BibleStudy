@@ -6,7 +6,7 @@ import { formatReference, parseReference } from '../shared/reference.ts';
 import { ApiFailure, api, messageFor } from './api.ts';
 import { AssistantPanel } from './Assistant.tsx';
 import { Download } from './Download.tsx';
-import { EsvBibleDownload } from './EsvBibleDownload.tsx';
+import { BibleDownload } from './BibleDownload.tsx';
 import { reportFums } from './fums.ts';
 import { Notes, inChapter } from './Notes.tsx';
 import { downloadedTranslations, downloadState, offlineChapter } from './offline.ts';
@@ -317,7 +317,7 @@ export function Reader(props: { groupId: string | null; userId: string }) {
         <Download userId={props.userId} at={{ translationId, bookId: at.bookId, chapter: at.chapter }} narrated={translation?.narration.state === 'available'} fromDevice={device !== null} />
       )}
 
-      {translationId === 'ESV' && <EsvBibleDownload key={props.userId} userId={props.userId} />}
+      <BibleDownload key={`${props.userId}/${translationId}`} userId={props.userId} translationId={translationId} />
 
       <article className="passage" aria-busy={text.kind === 'loading'}>
         {text.kind === 'unavailable' && <p role="status">{text.message}</p>}
