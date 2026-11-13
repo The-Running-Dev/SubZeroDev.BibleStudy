@@ -17,7 +17,7 @@ stack's values from a private var-file outside the repository.
    ./scripts/export-stack-env.ps1 -StackId 16 `
      -SecretNames DB_PASSWORD,APP_SECRET,SMTP_URL `
      -Skip BIBLESTUDY_IMAGE `
-     -Out "$HOME\.subzerodeviblestudy.tfvars.json"
+     -Out "$HOME.subzerodevbiblestudy.tfvars.json"
    ```
 
    `DB_PASSWORD` must stay exactly what it is: it lives inside the `db` volume.
