@@ -252,7 +252,7 @@ export async function downloadChapter(
       ) {
         throw new Error('The download manifest is incomplete; try again.');
       }
-      // Text without an expiry is imported (BSB, and CSB from the owner's files) and is kept.
+      // Text without an expiry is imported (BSB, CSB or ESV) and is kept.
       if (
         manifest.expiresAt !== null &&
         (!Number.isFinite(Date.parse(manifest.expiresAt)) || Date.parse(manifest.expiresAt) <= Date.now())

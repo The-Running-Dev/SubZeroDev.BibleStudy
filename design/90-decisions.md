@@ -483,3 +483,8 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
   - The existing reverse proxy terminates TLS on a `subzerodev.com` hostname.
 - **Rejected:** a managed platform. It means a new account, and possibly cost.
 - **Rejected:** hosting on the PC. The app would stop when the PC is off.
+
+## D-2026-11-13-01 — Add ESV from the owner's verified local download
+- **Context:** the owner requested a one-time import of the downloaded ESV Bible into the existing app, selectable for local use without API keys.
+- **Chosen:** extend the translation catalog, stored chapter importer, personal data and study sessions to ESV. Import the private `NN-Book/NNN.json` files once into Postgres and use existing per-account device downloads for offline reading. Preserve the downloaded verse numbering, headings, footnotes and cross-references. ESV has no narration source.
+- **Departure:** the original two-translation BSB/CSB contract now also supports ESV. See [ADR-0005](../docs/decisions/0005-local-esv.md).

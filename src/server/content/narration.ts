@@ -266,7 +266,7 @@ function toView(row: RecordingRow): RecordingView {
 }
 
 export async function narrationAvailability(db: Queryable, translationId: TranslationId): Promise<Availability> {
-  if (translationId === 'CSB') return { state: 'unavailable', reason: 'No licensed CSB recording.' };
+  if (translationId !== 'BSB') return { state: 'unavailable', reason: `No licensed ${translationId} recording.` };
   const narrators = await enabledNarrators(db, translationId);
   return narrators.length ? { state: 'available' } : { state: 'unavailable', reason: 'No narrator has a recorded license.' };
 }
@@ -287,7 +287,7 @@ export async function listRecordings(
     throw new AppError('chapter_not_found', 404, `${bookId} ${chapter} is not a chapter.`);
   }
   // A recording is only ever served for its own translation (I-12).
-  if (translationId === 'CSB') return { recordings: [], preparing: [], failed: [], queued: false };
+  if (translationId !== 'BSB') return { recordings: [], preparing: [], failed: [], queued: false };
 
   const { db, clock } = deps;
   const text = await db.query('SELECT 1 FROM chapters WHERE translation_id = $1 AND book_id = $2 AND chapter = $3', [translationId, book.id, chapter]);
@@ -347,7 +347,7 @@ export async function resolveRecording(
   ref: PassageRef,
   narratorId: string,
 ): Promise<RecordingView | null> {
-  if (translationId === 'CSB') return null;
+  if (translationId !== 'BSB') return null;
   const rows = await deps.db.query<RecordingRow>(
     `SELECT ${recordingColumns} FROM recordings r JOIN narrators n ON n.id = r.narrator_id
      WHERE r.translation_id = $1 AND r.book_id = $2 AND r.chapter = $3 AND r.narrator_id = $4 AND n.enabled AND n.translation_id = r.translation_id`,

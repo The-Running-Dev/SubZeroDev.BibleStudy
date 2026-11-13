@@ -10,6 +10,7 @@ import type {
   TranslationId,
   WrapUpView,
 } from '../../shared/api.ts';
+import { isTranslationId } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { derivePosition, rangeBounds, verseAtSeconds } from '../../shared/playback.ts';
 import { listRecordings, resolveRecording } from '../content/narration.ts';
@@ -336,7 +337,7 @@ export function parseCommand(value: unknown): Command | null {
       };
     }
     case 'set_translation':
-      return c.translationId === 'BSB' || c.translationId === 'CSB' ? { kind: 'set_translation', translationId: c.translationId } : null;
+      return isTranslationId(c.translationId) ? { kind: 'set_translation', translationId: c.translationId } : null;
     case 'set_narrator':
       return typeof c.narratorId === 'string' ? { kind: 'set_narrator', narratorId: c.narratorId } : null;
     case 'set_rate':
@@ -434,7 +435,7 @@ async function applyTo(q: Queryable, mediaDir: string, draft: Draft, command: Co
     }
 
     case 'set_narrator': {
-      if (draft.translationId !== 'BSB') reject('CSB has no narration.');
+      if (draft.translationId !== 'BSB') reject(`${draft.translationId} has no narration.`);
       const narrator = await q.query('SELECT 1 FROM narrators WHERE id = $1 AND translation_id = $2 AND enabled', [command.narratorId, draft.translationId]);
       if (!narrator.rowCount) reject('That narrator is not available.');
       const was = draft.recording;

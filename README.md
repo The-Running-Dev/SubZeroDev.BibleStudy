@@ -40,6 +40,12 @@ A private Bible-study app for a small group: shared narrated reading, questions 
    ```
    This copies the Berean Standard Bible (public domain) from the AO Lab Free Use Bible API into Postgres: 66 books, 1,189 chapters, about a minute. `--books ROM,1CO` limits it. Re-running it changes only chapters whose text changed, and every run is recorded in `import_manifests`. The exit code is 2 when any chapter failed; the JSON summary names them. The reader opens at Romans 1. CSB shows as not available until it has a source: Ben's scraped CSB XML for personal use (`--translation CSB --from <folder of NN-Book.xml files>`, kept out of git in `bibles/`, never expiring once imported), or an API.Bible key for chapters not imported. Every signed-in reader sees the same imported CSB chapters, catalog and download manifests, including readers without a group. `OWNER_EMAIL` is only for group setup; it does not restrict content. The former `CSB_IMPORTED_ACCESS` setting is removed and ignored if left in an existing environment. Downloads use normal per-account device storage, without an imported-content ownership check. See [the shared-content decision](docs/decisions/0004-shared-imported-csb.md).
 
+   Import downloaded ESV chapters once from the local JSON files:
+   ```bash
+   node --env-file=.env src/server/content/import-cli.ts --translation ESV --from bibles/ESV
+   ```
+   The folder contains `NN-Book/NNN.json` files produced by `scripts/Download-ESVBible.ps1`. The import stores ESV in Postgres for every signed-in reader, preserving verse numbers, headings, footnotes and cross-references. Select **ESV** in the reader; **Download for offline** saves chapters on that device. No API key or further ESV.org requests are needed. The source files stay outside git and the image. See [the ESV decision](docs/decisions/0005-local-esv.md).
+
 6. **Import narration (optional)**
    ```bash
    node --env-file=.env src/server/content/import-cli.ts --translation BSB --audio ROM:1-16

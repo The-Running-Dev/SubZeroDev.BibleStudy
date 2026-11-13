@@ -305,6 +305,7 @@ describe('Romans imported live from AO Lab', () => {
       [
         ['BSB', { state: 'available' }],
         ['CSB', { state: 'not_configured', reason: "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY)." }],
+        ['ESV', { state: 'unavailable', reason: 'ESV text has not been imported yet. Run import-content --translation ESV --from <ESV folder>.' }],
       ],
     );
     const csb = await get('/api/content/CSB/ROM/1');

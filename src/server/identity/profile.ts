@@ -1,4 +1,5 @@
 import type { Profile, ProfilePatch, TranslationId } from '../../shared/api.ts';
+import { isTranslationId } from '../../shared/api.ts';
 import type { Queryable } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { canonicalTimeZone, normalizeDisplayName } from './validation.ts';
@@ -50,7 +51,7 @@ export async function updateProfile(db: Queryable, userId: string, patch: unknow
   }
   if ('displayTranslationId' in input) {
     const id = input.displayTranslationId;
-    if (id !== null && id !== 'BSB' && id !== 'CSB') throw new AppError('invalid_request', 400, 'displayTranslationId is BSB, CSB or null.');
+    if (id !== null && !isTranslationId(id)) throw new AppError('invalid_request', 400, 'displayTranslationId is BSB, CSB, ESV or null.');
     values.push(id);
     sets.push(`display_translation_id = $${values.length}`);
   }

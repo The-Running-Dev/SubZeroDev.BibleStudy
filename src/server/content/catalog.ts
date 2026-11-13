@@ -1,4 +1,5 @@
 import type { Availability, BookView, TranslationId, TranslationView } from '../../shared/api.ts';
+import { isTranslationId } from '../../shared/api.ts';
 import { bookById, books } from '../../shared/books.ts';
 import type { Clock } from '../platform/clock.ts';
 import type { Queryable } from '../platform/db.ts';
@@ -20,11 +21,14 @@ export const csbNotConfigured: Availability = {
   state: 'not_configured',
   reason: "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY).",
 };
-const bsbNotImported: Availability = { state: 'unavailable', reason: 'BSB text has not been imported yet. Run import-content --translation BSB.' };
+const notImported = (id: TranslationId): Availability => ({
+  state: 'unavailable',
+  reason: `${id} text has not been imported yet. Run import-content --translation ${id}${id === 'ESV' ? ' --from <ESV folder>' : ''}.`,
+});
 
 export function parseTranslationId(input: unknown): TranslationId {
-  if (input === 'BSB' || input === 'CSB') return input;
-  throw new AppError('invalid_request', 400, 'translation is BSB or CSB.');
+  if (isTranslationId(input)) return input;
+  throw new AppError('invalid_request', 400, 'translation is BSB, CSB or ESV.');
 }
 
 // An imported CSB chapter never expires; a cached API.Bible one does.
@@ -39,7 +43,7 @@ async function textAvailability(db: Queryable, translationId: TranslationId, csb
     return csb ? csb.api.status() : csbNotConfigured;
   }
   const result = await db.query('SELECT 1 FROM chapters WHERE translation_id = $1 LIMIT 1', [translationId]);
-  return result.rowCount ? { state: 'available' } : bsbNotImported;
+  return result.rowCount ? { state: 'available' } : notImported(translationId);
 }
 
 function unavailable(availability: Availability): AppError {
@@ -158,7 +162,7 @@ export async function getChapter(db: Queryable, translationId: TranslationId, bo
   if (translationId === 'CSB') row = await csbChapter(db, csb, book.id, chapter);
   else {
     const result = await db.query<ChapterRow>(selectChapter, [translationId, book.id, chapter]);
-    if (!result.rows[0]) throw unavailable(bsbNotImported);
+    if (!result.rows[0]) throw unavailable(notImported(translationId));
     row = result.rows[0];
   }
 
