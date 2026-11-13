@@ -150,7 +150,7 @@ $errorText = ''
 try { & $downloader -OutputDirectory (Join-Path $testRoot 'invalid-scope') -Book 40 -Chapter 29 } catch { $errorText = $_.Exception.Message }
 Assert ($errorText -match 'only 28 chapters') 'reject invalid chapter selection'
 Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count) 'validate scope before requests'
-Assert (@(Get-ChildItem -LiteralPath $testRoot -Recurse -Filter '.esv-*').Count -eq 0) 'clean partial files after errors'
+Assert (@(Get-ChildItem -LiteralPath $testRoot -Recurse -Force -Filter '.esv-*').Count -eq 0) 'clean partial files after errors'
 
 # Fail at each publication step, including after the source has already moved.
 foreach ($suffix in '.source.html', '.html', '.json') {
@@ -175,7 +175,7 @@ try { Invoke-Fixture 'local-exhausted' 3 } catch { $errorText = $_.Exception.Mes
 Assert ($errorText -match 'Stopped at Matthew 1' -and $errorText -match 'Local file operation') 'stop when local retries are exhausted'
 Assert ($global:EsvDownloaderTestState.Requests.Count -eq $count + 1) 'exhausted local retries never trigger another HTTP request'
 Assert (-not (Test-Path (Join-Path $testRoot 'local-exhausted/40-Matthew/001.json'))) 'never mark an interrupted save complete'
-Assert (@(Get-ChildItem -LiteralPath (Join-Path $testRoot 'local-exhausted') -Recurse -Filter '.esv-*.json').Count -eq 1) 'retain unpublished files for diagnosis after exhausted retries'
+Assert (@(Get-ChildItem -LiteralPath (Join-Path $testRoot 'local-exhausted') -Recurse -Force -Filter '.esv-*.json').Count -eq 1) 'retain unpublished files for diagnosis after exhausted retries'
 $global:EsvDownloaderTestState.FileFailures = 0
 
 if ($IsWindows) {
