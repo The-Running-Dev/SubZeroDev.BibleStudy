@@ -3,7 +3,11 @@
 export type Uuid = string;
 export type IsoInstant = string;
 export type IanaZone = string;
-export type TranslationId = 'BSB' | 'CSB';
+export type TranslationId = 'BSB' | 'CSB' | 'ESV';
+
+export function isTranslationId(value: unknown): value is TranslationId {
+  return value === 'BSB' || value === 'CSB' || value === 'ESV';
+}
 export type BookId = string; // USFM code, e.g. 'ROM'
 
 export interface PassageRef {

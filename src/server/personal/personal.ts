@@ -1,4 +1,5 @@
-import type { NoteAnchor, NoteView, PullResponse, PushResult, SoloPositionView, SyncOp } from '../../shared/api.ts';
+import type { NoteAnchor, NoteView, PullResponse, PushResult, SoloPositionView, SyncOp, TranslationId } from '../../shared/api.ts';
+import { isTranslationId } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { maxVerse } from '../../shared/reference.ts';
 import type { Clock } from '../platform/clock.ts';
@@ -27,7 +28,7 @@ const int = (value: unknown): value is number => Number.isInteger(value);
 function parseAnchor(value: unknown): NoteAnchor {
   const a = value as Record<string, unknown> | null;
   if (!a || typeof a !== 'object') throw invalid('A note anchor is { translationId, bookId, chapter, startVerse, endVerse }.');
-  if (a.translationId !== 'BSB' && a.translationId !== 'CSB') throw invalid('A note anchor translation is BSB or CSB.');
+  if (!isTranslationId(a.translationId)) throw invalid('A note anchor translation is BSB, CSB or ESV.');
   const book = typeof a.bookId === 'string' ? bookById(a.bookId) : undefined;
   if (!book) throw invalid('A note anchor names a book of the Bible.');
   if (!int(a.chapter) || a.chapter < 1 || a.chapter > book.chapters) throw invalid(`${book.name} has ${book.chapters} chapters.`);
@@ -89,7 +90,7 @@ export function parsePush(body: unknown): SyncOp[] {
 interface NoteRow {
   id: string;
   user_id: string;
-  translation_id: 'BSB' | 'CSB';
+  translation_id: TranslationId;
   book_id: string;
   chapter: number;
   start_verse: number | null;
@@ -218,7 +219,7 @@ function parseCursor(value: unknown): bigint | null {
 }
 
 export async function soloPositionOf(q: Queryable, userId: string): Promise<SoloPositionView | null> {
-  const result = await q.query<{ translation_id: 'BSB' | 'CSB'; book_id: string; chapter: number; verse: number; revision: number }>(
+  const result = await q.query<{ translation_id: TranslationId; book_id: string; chapter: number; verse: number; revision: number }>(
     'SELECT translation_id, book_id, chapter, verse, revision FROM solo_positions WHERE user_id = $1',
     [userId],
   );

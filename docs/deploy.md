@@ -40,6 +40,12 @@ These are account and server settings, so they are the owner's to make. Nothing 
 
    Every signed-in reader can read/download the same imported text. Offline downloads remain stored separately per account, as for BSB; imported-only account scopes are no longer enforced and unscoped copies are no longer purged. Older installed clients must update to use the shared policy. Copies already purged by an older client can be downloaded again. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed.
 
+8. **Import ESV once from the downloaded JSON files.** Copy the `bibles/ESV` folder into the app container, then run:
+   ```bash
+   docker exec "$app" node src/server/content/import-cli.ts --translation ESV --from /tmp/ESV
+   ```
+   Only `NN-Book/NNN.json` files are needed; HTML and verification artifacts are not used. Check the summary for 1,189 inserted chapters and no failures, then remove the temporary source copy. ESV stays in Postgres across redeploys and is covered by database backups. All signed-in readers can select it and download text for offline reading. Re-running the import leaves unchanged chapters alone. No ESV API credentials are required. ESV has no narration source. See [ADR-0005](decisions/0005-local-esv.md).
+
 ## Environment variables
 
 Set these in the Portainer stack (or a git-ignored `.env` next to `compose.yaml` when running by hand). [stack.env.example](../stack.env.example) lists them with placeholder values; [.env.example](../.env.example) is for local development only. The server refuses to start with the examples' `APP_SECRET` or `CONNECTOR_TOKEN`.

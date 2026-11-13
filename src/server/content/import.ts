@@ -19,7 +19,7 @@ export interface TextBook {
   sha256: string;
 }
 
-// Where a translation's text is imported from: AO Lab for BSB, the owner's files for CSB. The edition a
+// Where a translation's text is imported from: AO Lab for BSB, the owner's files for CSB/ESV. The edition a
 // complete import records names the kind.
 export interface TextSource {
   translationId: TranslationId;

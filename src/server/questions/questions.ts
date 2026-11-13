@@ -1,5 +1,5 @@
 import type { Disposition, PassageRef, PostQuestionRequest, QuestionStatus, QuestionView, ReplyView, TranslationId } from '../../shared/api.ts';
-import { dispositions, questionStatuses } from '../../shared/api.ts';
+import { dispositions, isTranslationId, questionStatuses } from '../../shared/api.ts';
 import { bookById } from '../../shared/books.ts';
 import { requireMember } from '../groups/groups.ts';
 import type { Clock } from '../platform/clock.ts';
@@ -132,7 +132,7 @@ const int = (value: unknown): value is number => Number.isInteger(value);
 async function anchor(q: Queryable, value: unknown): Promise<PassageRef & { translationId: TranslationId }> {
   if (!value || typeof value !== 'object') throw invalid('A question needs a passage.');
   const a = value as Record<string, unknown>;
-  if (a.translationId !== 'BSB' && a.translationId !== 'CSB') throw invalid('Unknown translation.');
+  if (!isTranslationId(a.translationId)) throw invalid('Unknown translation.');
   const book = typeof a.bookId === 'string' ? bookById(a.bookId) : undefined;
   if (!book || !int(a.chapter) || a.chapter < 1 || a.chapter > book.chapters) throw invalid('That is not a chapter.');
   const optional = (v: unknown) => v === null || v === undefined || int(v);

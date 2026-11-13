@@ -1,5 +1,6 @@
 // import-content --translation BSB [--books ROM,1CO] [--audio ROM:1-16] [--narrators souer,hays]
 // import-content --translation CSB --from /bibles/CSB [--books ROM,1CO]
+// import-content --translation ESV --from /bibles/ESV [--books MAT]
 // Run inside the app container (or locally with DATABASE_URL set). Prints the manifest summary.
 // --audio alone imports recordings only (their chapters' text must already be imported);
 // with --books, or with neither flag, the text is imported first.
@@ -10,6 +11,7 @@ import { systemClock } from '../platform/clock.ts';
 import { createPool } from '../platform/db.ts';
 import { createAoLabSource } from './aolab.ts';
 import { createCsbFileSource } from './csb-files.ts';
+import { createEsvFileSource } from './esv-files.ts';
 import { importText, runImport, type ImportManifestSummary } from './import.ts';
 import { importAudio, narratorsFor, parseAudioScope } from './narration.ts';
 
@@ -31,10 +33,11 @@ const usage = (message: string) => {
   console.error(message);
   process.exit(1);
 };
-if (values.translation !== 'BSB' && values.translation !== 'CSB') usage('--translation must be BSB or CSB');
+if (values.translation !== 'BSB' && values.translation !== 'CSB' && values.translation !== 'ESV') usage('--translation must be BSB, CSB or ESV');
 if (values.translation === 'CSB' && !values.from) usage('--translation CSB needs --from <folder of NN-Book.xml files>');
-if (values.translation === 'CSB' && (values.audio !== undefined || values.narrators !== undefined)) usage('CSB has no recordings; --audio and --narrators are BSB only');
-if (values.translation === 'BSB' && values.from !== undefined) usage('--from is for CSB; BSB is imported from AO Lab');
+if (values.translation === 'ESV' && !values.from) usage('--translation ESV needs --from <folder of NN-Book/NNN.json files>');
+if (values.translation !== 'BSB' && (values.audio !== undefined || values.narrators !== undefined)) usage(`${values.translation} has no recordings; --audio and --narrators are BSB only`);
+if (values.translation === 'BSB' && values.from !== undefined) usage('--from is for CSB or ESV; BSB is imported from AO Lab');
 const list = (raw: string | undefined) => raw?.split(',').map((item) => item.trim()).filter(Boolean);
 
 let audioScopes: ReturnType<typeof parseAudioScope>[] = [];
@@ -56,8 +59,8 @@ try {
     const books = list(values.books);
     if (books && books.length === 0) throw new Error('--books lists no books; omit it to import every book');
     const summary: ImportManifestSummary =
-      values.translation === 'CSB'
-        ? await importText({ db: pool, clock: systemClock, text: createCsbFileSource(values.from!) }, { translationId: 'CSB', books })
+      values.translation === 'CSB' || values.translation === 'ESV'
+        ? await importText({ db: pool, clock: systemClock, text: values.translation === 'ESV' ? createEsvFileSource(values.from!) : createCsbFileSource(values.from!) }, { translationId: values.translation, books })
         : await runImport({ db: pool, clock: systemClock, source }, { translationId: 'BSB', books });
     console.log(JSON.stringify({ kind: 'text', manifestId: summary.manifestId, status: summary.status, sourceSha256: summary.sourceSha256, counts: summary.counts }));
     for (const item of summary.items) if (item.status === 'failed') console.error(`failed ${item.bookId} ${item.chapter}: ${'reason' in item ? item.reason : ''}`);
