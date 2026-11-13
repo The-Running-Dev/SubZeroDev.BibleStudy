@@ -51,3 +51,8 @@ data/
 
 # The owner's licensed CSB files: never committed, never in the image.
 /bibles/
+
+# OpenTofu (deploy/)
+deploy/.terraform/
+deploy/backend.hcl
+deploy/*.tfvars.json
