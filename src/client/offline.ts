@@ -18,7 +18,7 @@ import { ApiFailure } from './api.ts';
 export type DownloadState =
   | { state: 'absent' }
   | { state: 'downloading'; doneBytes: number; totalBytes: number }
-  | { state: 'ready'; expiresAt: IsoInstant | null; withNarration: boolean }
+  | { state: 'ready'; withNarration: boolean }
   | { state: 'failed'; reason: string }
   | { state: 'expired' };
 
@@ -37,7 +37,8 @@ interface DownloadRecord extends ChapterRef {
   translation: TranslationView | null;
   recording: RecordingView | null;
   audio: { url: string; sha256: string; bytes: number } | null;
-  expiresAt: IsoInstant | null;
+  // Set only on CSB text an earlier version fetched from API.Bible, which may not be kept past this (ADR-0008).
+  expiresAt?: IsoInstant | null;
   totalBytes: number;
   savedAt: IsoInstant;
 }
@@ -252,13 +253,6 @@ export async function downloadChapter(
       ) {
         throw new Error('The download manifest is incomplete; try again.');
       }
-      // Text without an expiry is imported (BSB, CSB or ESV) and is kept.
-      if (
-        manifest.expiresAt !== null &&
-        (!Number.isFinite(Date.parse(manifest.expiresAt)) || Date.parse(manifest.expiresAt) <= Date.now())
-      ) {
-        throw new Error('This download has expired — connect to download it again.');
-      }
       const listing = withNarration
         ? await getJson<RecordingsResponse>(
             `/api/content/${ref.translationId}/${ref.bookId}/${ref.chapter}/recordings`,
@@ -318,13 +312,10 @@ export async function downloadChapter(
       if (
         chapter.translationId !== ref.translationId ||
         chapter.bookId !== ref.bookId ||
-        chapter.chapter !== ref.chapter ||
-        chapter.expiresAt !== manifest.expiresAt
+        chapter.chapter !== ref.chapter
       ) {
         throw new Error('The chapter changed while downloading; try again.');
       }
-      if (manifest.expiresAt !== null && Date.parse(manifest.expiresAt) <= Date.now())
-        throw new Error('This download expired before it finished; try again.');
 
       const record: DownloadRecord = {
         userId,
@@ -338,7 +329,6 @@ export async function downloadChapter(
         audio: audioAsset
           ? { url: audioAsset.url, sha256: audioAsset.sha256, bytes: audioAsset.bytes }
           : null,
-        expiresAt: manifest.expiresAt,
         totalBytes: manifest.totalBytes,
         savedAt: new Date().toISOString(),
       };
@@ -348,11 +338,11 @@ export async function downloadChapter(
       if (previous?.audio && previous.audio.url !== record.audio?.url)
         await releaseAudio(previous.audio.url, null);
       // Audio skipped as already cached can still be released by a failing download before this record was written.
-      if (isExpired(record) || await evicted(record)) {
+      if (await evicted(record)) {
         await writeDownload((s) => s.delete([userId, id]));
-        throw new Error('The download expired or its stored assets failed verification; try again.');
+        throw new Error('The stored assets of the download failed verification; try again.');
       }
-      return { state: 'ready', expiresAt: record.expiresAt, withNarration: record.withNarration };
+      return { state: 'ready', withNarration: record.withNarration };
     } catch (error) {
       if (addedAudio) await releaseAudio(addedAudio, null).catch(() => undefined);
       const reason = signal.aborted
@@ -403,10 +393,10 @@ async function evicted(record: DownloadRecord): Promise<boolean> {
 }
 
 const isExpired = (record: DownloadRecord) =>
-  record.expiresAt !== null &&
+  record.expiresAt != null &&
   (!Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= Date.now());
 
-// Licensed text is kept no longer than the server may keep it (I-11): an expired download keeps only its listing.
+// API.Bible text is kept no longer than its licence allowed: an expired download keeps only its listing.
 async function expire(record: DownloadRecord): Promise<void> {
   if (record.chapterBody === '' && record.audio === null) return;
   await withMediaLock('exclusive', async () => {
@@ -432,7 +422,7 @@ export async function downloadState(userId: Uuid, ref: ChapterRef): Promise<Down
     await removeDownload(userId, ref);
     return { state: 'absent' };
   }
-  return { state: 'ready', expiresAt: record.expiresAt, withNarration: record.withNarration };
+  return { state: 'ready', withNarration: record.withNarration };
 }
 
 export interface DownloadSummary extends ChapterRef {

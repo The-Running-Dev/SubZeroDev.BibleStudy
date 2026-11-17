@@ -33,14 +33,14 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
   app.get('/api/content/translations', async (request, reply) => {
     requireAuth(request);
     reply.header('cache-control', 'private, no-store');
-    return listTranslations(deps.db, deps.csb ?? null);
+    return listTranslations(deps.db);
   });
 
   app.get('/api/content/books', async (request, reply) => {
     requireAuth(request);
     reply.header('cache-control', 'private, no-store');
     const query = request.query as Record<string, unknown>;
-    return listBooks(deps.db, parseTranslationId(query.translation), deps.csb ?? null);
+    return listBooks(deps.db, parseTranslationId(query.translation));
   });
 
   app.get('/api/content/:translation/:book/:chapter', async (request, reply) => {
@@ -48,9 +48,9 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
     const params = request.params as { translation: string; book: string; chapter: string };
     const chapter = /^\d{1,3}$/.test(params.chapter) ? Number(params.chapter) : NaN;
     reply.header('cache-control', 'private, no-store');
-    const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter, deps.csb ?? null);
+    const stored = await getChapter(deps.db, parseTranslationId(params.translation), params.book.toUpperCase(), chapter);
     const etag = stored.etag;
-    reply.header('etag', etag).header('cache-control', params.translation === 'CSB' ? 'private, no-store' : 'private, no-cache');
+    reply.header('etag', etag).header('cache-control', 'private, no-cache');
     if (request.headers['if-none-match'] === etag) return reply.status(304).send();
     return reply.type('application/json; charset=utf-8').send(stored.body);
   });
@@ -63,7 +63,7 @@ export function registerContentRoutes(app: FastifyInstance, deps: AppDeps): void
     const query = request.query as Record<string, unknown>;
     reply.header('cache-control', 'private, no-store');
     const { queued, ...manifest } = await downloadManifest(
-      { db: deps.db, clock: deps.clock, mediaDir: deps.config.mediaDir, csb: deps.csb ?? null },
+      { db: deps.db, clock: deps.clock, mediaDir: deps.config.mediaDir },
       parseTranslationId(params.translation),
       params.book.toUpperCase(),
       chapter,

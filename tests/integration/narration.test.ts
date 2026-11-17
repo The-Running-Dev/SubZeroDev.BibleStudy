@@ -364,7 +364,6 @@ describe('narration from a fixture source', () => {
     assert.deepEqual(text.json(), {
       assets: [{ url: '/api/content/BSB/JUD/1', sha256: sha256Hex(chapter.rawPayload), bytes: chapter.rawPayload.length, kind: 'chapter' }],
       totalBytes: chapter.rawPayload.length,
-      expiresAt: null,
     });
 
     // Narration not yet stored: refused and queued, so asking again shortly succeeds.

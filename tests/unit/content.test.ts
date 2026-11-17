@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { AoChapter } from '../../src/server/content/aolab.ts';
-import { normalizeApiChapter } from '../../src/server/content/apibible.ts';
-import type { ApiNode } from '../../src/server/content/apibible.ts';
 import { contentHash, normalizeChapter, serializeContent, verseText } from '../../src/server/content/normalize.ts';
+import { plainText, servedContent, verseRef } from '../../src/server/content/text.ts';
+import type { ChapterText } from '../../src/server/content/text.ts';
 import { adjacentChapter, books } from '../../src/shared/books.ts';
 import { formatReference, parseReference } from '../../src/shared/reference.ts';
 
@@ -146,52 +146,41 @@ describe('normalizing AO Lab chapters', () => {
   });
 });
 
-// Synthetic API.Bible JSON content (content-type=json): no CSB text is kept in this repository.
-describe('S13 normalizing API.Bible chapters', () => {
-  const text = (value: string, verseId: string): ApiNode => ({ type: 'text', text: value, attrs: { verseId } });
-  const verse = (n: number): ApiNode => ({ type: 'tag', name: 'verse', attrs: { number: String(n), style: 'v' }, items: [{ type: 'text', text: String(n) }] });
-  const para = (style: string, items: ApiNode[]): ApiNode => ({ type: 'tag', name: 'para', attrs: { style }, items });
+describe('chapter text and the served copy', () => {
+  const text: ChapterText = {
+    verses: [
+      { number: 1, text: 'One.' },
+      { number: 2, text: 'Two.' },
+    ],
+    headings: [{ beforeVerse: 1, level: 2, text: 'A heading' }],
+    notes: [
+      { verse: 1, kind: 'footnote', text: 'A note.', passage: null },
+      { verse: 2, kind: 'crossref', text: 'Referenced in John 1:1', passage: 'John 1:1' },
+    ],
+  };
 
-  test('joins verse pieces, keeps headings and poetry lines, and drops references and other chapters', () => {
-    const nodes: ApiNode[] = [
-      para('s1', [{ type: 'text', text: 'First   heading ' }]),
-      para('p', [
-        verse(1),
-        text('Alpha begins ', 'ROM.1.1'),
-        { type: 'tag', name: 'char', attrs: { style: 'wj' }, items: [text('in red.', 'ROM.1.1')] },
-        verse(2),
-        text('Beta runs', 'ROM.1.2'),
-      ]),
-      para('p', [text('across a paragraph.', 'ROM.1.2'), { type: 'tag', name: 'note', attrs: { style: 'f' }, items: [text('a note', 'ROM.1.2')] }]),
-      para('r', [{ type: 'text', text: '(Gen 1:1)' }]),
-      para('s1', [{ type: 'text', text: 'A song' }]),
-      para('q1', [verse(3), text('Line one', 'ROM.1.3')]),
-      para('q2', [text('line two', 'ROM.1.3')]),
-      para('p', [text('Not this chapter', 'ROM.2.1')]),
-    ];
-    assert.deepEqual(normalizeApiChapter(nodes, 'ROM', 1), {
-      verses: [
-        { number: 1, text: 'Alpha begins in red.' },
-        { number: 2, text: 'Beta runs across a paragraph.' },
-        { number: 3, text: 'Line one\nline two' },
+  test('the served copy shows cross references among the notes and drops levels', () => {
+    assert.deepEqual(servedContent(text), {
+      verses: text.verses,
+      headings: [{ beforeVerse: 1, text: 'A heading' }],
+      footnotes: [
+        { verse: 1, text: 'A note.' },
+        { verse: 2, text: 'Cross-reference: Referenced in John 1:1' },
       ],
-      headings: [
-        { beforeVerse: 1, text: 'First heading' },
-        { beforeVerse: 3, text: 'A song' },
-      ],
-      footnotes: [],
     });
   });
 
-  test('a bridged verse is kept under its first number', () => {
-    const nodes = [para('p', [verse(1), text('Joined text ', 'ROM.1.1-2'), text('and more.', 'ROM.1.1-ROM.1.2'), verse(3), text('Third.', 'ROM.1.3')])];
-    assert.deepEqual(normalizeApiChapter(nodes, 'ROM', 1).verses, [
-      { number: 1, text: 'Joined text and more.' },
-      { number: 3, text: 'Third.' },
-    ]);
+  test('AO Lab content has no levels and only footnotes, and round-trips', () => {
+    const content = servedContent({ ...text, headings: [{ beforeVerse: 1, level: null, text: 'A heading' }], notes: [text.notes[0]] });
+    assert.deepEqual(plainText(content), { ...text, headings: [{ beforeVerse: 1, level: null, text: 'A heading' }], notes: [text.notes[0]] });
+    assert.deepEqual(servedContent(plainText(content)), content);
   });
 
-  test('a chapter with no verse text normalizes to no verses', () => {
-    assert.deepEqual(normalizeApiChapter([para('p', [{ type: 'text', text: 'untagged' }])], 'ROM', 1).verses, []);
+  test('a verse reference is BBCCCVVV in canon order', () => {
+    assert.equal(verseRef('GEN', 1, 1), 1_001_001);
+    assert.equal(verseRef('ROM', 3, 23), 45_003_023);
+    assert.equal(verseRef('PSA', 119, 176), 19_119_176);
+    assert.equal(verseRef('REV', 22, 21), 66_022_021);
+    assert.throws(() => verseRef('XYZ', 1, 1), /not a canon book/);
   });
 });

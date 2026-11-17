@@ -25,3 +25,5 @@ Ben supplied the scraped-XML provenance. Licensing approval remains outside engi
 Reuse the synthetic account matrix to require identical chapter bodies, ETags, catalogs and manifests for the configured owner, ordinary members and accounts without a group. Cover missing/mismatched owner configuration, the obsolete disabled setting, signed-out refusals, HEAD/conditional and encoded routes, shared API.Bible/import races, assistant passage loading and offline compatibility.
 
 Every merge continues to deploy automatically after the image drill and publication succeed. Verify the deployed build id separately from CI; production account-matrix verification must be reported only when actually performed. Installed clients must update to stop enforcing their older offline scope rules.
+
+API.Bible was later removed: see [ADR-0008](0008-verse-tables.md).

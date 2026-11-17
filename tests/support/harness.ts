@@ -52,10 +52,10 @@ export async function resetDatabase(db: Db): Promise<void> {
   await migrate(db);
 }
 
-// Keeps migration-seeded reference rows (translations, narrators).
+// Keeps migration-seeded reference rows (translations, narrators, canon).
 export async function truncateAll(db: Db): Promise<void> {
   const tables = await db.query<{ tablename: string }>(
-    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('schema_migrations', 'translations', 'narrators')`,
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('schema_migrations', 'translations', 'narrators', 'canon')`,
   );
   if (tables.rowCount) await db.query(`TRUNCATE ${tables.rows.map((t) => `"${t.tablename}"`).join(', ')} CASCADE`);
 }

@@ -207,7 +207,7 @@ describe('installing and reading offline (S14)', () => {
     }
   });
 
-  test('an expired download keeps no chapter text or audio on the device, only its listing', async () => {
+  test('a legacy expired download (API.Bible CSB) keeps no chapter text or audio on the device, only its listing', async () => {
     const context = await browser.newContext(mobile);
     try {
       const page = await open(context);

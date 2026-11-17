@@ -1,275 +1,113 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import type { Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { createCsbFileSource } from '../../src/server/content/csb-files.ts';
-import { sha256Hex } from '../../src/server/platform/secrets.ts';
 import { importText } from '../../src/server/content/import.ts';
+import { sha256Hex } from '../../src/server/platform/secrets.ts';
 import type { Harness } from '../support/harness.ts';
-import { ownerEmail, signIn, startHarness, truncateAll } from '../support/harness.ts';
+import { signIn, startHarness, truncateAll } from '../support/harness.ts';
 
-// A local stand-in for API.Bible. It answers with synthetic text only: no CSB text is kept in this repository, and S13.3
-// against the real service needs the owner's key and approved CSB access.
-const fixtureKey = 'fixture-key';
-const bibleId = 'csb-fixture';
-const copyright = 'Synthetic copyright notice for tests.';
-const day = 24 * 60 * 60 * 1000;
+// Synthetic markup in the shape of the owner's CSB files: no CSB text is kept in this repository.
+const romans = (verseTwo: string) => `<book id="bk.45">
+<chapter id="romans.1" display="1">
+<head1>Fixture Heading</head1>
+<p><verse reference="romans.1.1" display-number="1"><sup class="verse-ref">1</sup>Grace fixture verse.<sup class="cross-ref"><a data-content="1Co 1:1; 2Co 1:1">a</a></sup></verse>
+<verse reference="romans.1.2" display-number="2"><sup class="verse-ref">2</sup>${verseTwo}<sup class="translate-note"><a data-content="Or synthetic">b</a></sup></verse></p>
+<head3>Minor Fixture Heading</head3>
+<p><verse reference="romans.1.3" display-number="3"><sup class="verse-ref">3</sup>Third fixture verse.</verse></p>
+</chapter>
+</book>`;
 
-let mode: 'ok' | 'missing-key' | 'bad-key' | 'down' | 'limited' | 'no-chapter' = 'ok';
-let served = 0;
-let beforeChapterReply: (() => Promise<void>) | null = null;
-const requests: string[] = [];
-let api: Server;
 let h: Harness;
 let cookie: string;
-let savedNotice: string;
 
-function answer(url: URL, headers: Record<string, string | string[] | undefined>): [number, unknown] {
-  if (mode === 'down') return [503, { message: 'unavailable' }];
-  if (mode === 'limited') return [429, { message: 'Too many requests' }];
-  // Recorded 2026-10-31: no key is 401, an unknown key is 403 with this body.
-  if (mode === 'missing-key') return [401, { statusCode: 401, error: 'Unauthorized', message: 'Missing API key' }];
-  if (mode === 'bad-key' || headers['api-key'] !== fixtureKey) return [403, { statusCode: 403, error: 'Forbidden', message: 'Invalid API key' }];
-  if (url.pathname === `/v1/bibles/${bibleId}`) return [200, { data: { id: bibleId, abbreviation: 'CSB' } }];
-  const match = new RegExp(`^/v1/bibles/${bibleId}/chapters/([1-3A-Z]{3})\\.(\\d+)$`).exec(url.pathname);
-  if (!match || mode === 'no-chapter') return [404, { message: 'not found' }];
-  const id = `${match[1]}.${match[2]}`;
-  served += 1;
-  const verse = (n: number, value: string) => [
-    { type: 'tag', name: 'verse', attrs: { number: String(n), style: 'v' }, items: [{ type: 'text', text: String(n) }] },
-    { type: 'text', text: value, attrs: { verseId: `${id}.${n}` } },
-  ];
-  return [
-    200,
-    {
-      data: {
-        id,
-        bibleId,
-        number: match[2],
-        bookId: match[1],
-        reference: id,
-        verseCount: 2,
-        copyright,
-        content: [
-          { type: 'tag', name: 'para', attrs: { style: 's1' }, items: [{ type: 'text', text: 'Synthetic heading' }] },
-          { type: 'tag', name: 'para', attrs: { style: 'p' }, items: [...verse(1, `Fixture verse one, fetch ${served}.`), ...verse(2, 'Fixture verse two.')] },
-        ],
-      },
-      meta: { fumsToken: `token-${id}-${served}` },
-    },
-  ];
-}
-
-before(async () => {
-  api = createServer(async (request, response) => {
-    const url = new URL(request.url ?? '/', 'http://fixture');
-    requests.push(url.pathname + url.search);
-    if (url.pathname.includes('/chapters/')) await beforeChapterReply?.();
-    const [status, body] = answer(url, request.headers);
-    response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
-  });
-  await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
-  h = await startHarness({
-    APIBIBLE_KEY: fixtureKey,
-    APIBIBLE_CSB_BIBLE_ID: bibleId,
-    APIBIBLE_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}/v1`,
-  });
-  savedNotice = (await h.db.query<{ copyright_notice: string }>(`SELECT copyright_notice FROM translations WHERE id = 'CSB'`)).rows[0].copyright_notice;
-});
-after(async () => {
-  await h?.db.query(`UPDATE translations SET copyright_notice = $1 WHERE id = 'CSB'`, [savedNotice]);
-  await h?.close();
-  api?.close();
-});
-
+before(async () => { h = await startHarness(); });
+after(async () => { await h?.close(); });
 beforeEach(async () => {
   await truncateAll(h.db);
-  // A day apart, so the availability one test cached has expired by the next.
-  h.clock.advance(day);
-  mode = 'ok';
-  beforeChapterReply = null;
-  requests.length = 0;
   cookie = (await signIn(h, 'reader@example.test')).cookie;
 });
 
 const get = (url: string) => h.app.inject({ method: 'GET', url, cookies: { bs_session: cookie } });
 const csbOf = async () => (await get('/api/content/translations')).json().find((t: { id: string }) => t.id === 'CSB');
+async function importRomans(verseTwo: string) {
+  const dir = await mkdtemp(join(tmpdir(), 'csb-import-'));
+  await writeFile(join(dir, '45-Rom.xml'), romans(verseTwo));
+  try {
+    return await importText({ db: h.db, clock: h.clock, text: createCsbFileSource(dir) }, { translationId: 'CSB', books: ['ROM'] });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+const rows = async (table: 'verses' | 'headings' | 'verse_notes', columns: string) =>
+  (await h.db.query(`SELECT ${columns} FROM ${table} WHERE translation_id = 'CSB' ORDER BY ref, 1`)).rows;
 
-describe('CSB from API.Bible (S13)', () => {
-  test('S13.2 a key API.Bible refuses makes CSB unavailable: "API.Bible rejected the key" (401 and 403)', async () => {
-    for (const refused of ['missing-key', 'bad-key'] as const) {
-      mode = refused;
-      h.clock.advance(day);
-      assert.deepEqual((await csbOf()).availability, { state: 'unavailable', reason: 'API.Bible rejected the key' }, refused);
-      const chapter = await get('/api/content/CSB/ROM/1');
-      assert.equal(chapter.statusCode, 409);
-      assert.equal(chapter.json().error, 'translation_unavailable');
-      assert.equal(chapter.json().message, 'API.Bible rejected the key');
-      assert.equal((await get('/api/content/books?translation=CSB')).statusCode, 409);
-    }
-    assert.equal((await h.db.query(`SELECT 1 FROM chapters WHERE translation_id = 'CSB'`)).rowCount, 0);
-  });
-
-  test('S13.3 (fixture) a chapter comes from API.Bible with its notice, a 14-day expiry and the Fair Use token', async () => {
-    assert.deepEqual((await csbOf()).availability, { state: 'available' });
-    const response = await get('/api/content/CSB/rom/1');
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.headers['cache-control'], 'private, no-store');
-    const chapter = response.json();
-    assert.deepEqual(
-      { ...chapter, contentSha256: undefined },
-      {
-        translationId: 'CSB',
-        bookId: 'ROM',
-        chapter: 1,
-        verseCount: 2,
-        contentSha256: undefined,
-        expiresAt: new Date(h.clock.now().getTime() + 14 * day).toISOString(),
-        fums: { token: 'token-ROM.1-1' },
-        verses: [
-          { number: 1, text: 'Fixture verse one, fetch 1.' },
-          { number: 2, text: 'Fixture verse two.' },
-        ],
-        headings: [{ beforeVerse: 1, text: 'Synthetic heading' }],
-        footnotes: [],
-      },
-    );
-    const call = requests.find((r) => r.includes('/chapters/'));
-    assert.ok(call?.startsWith(`/v1/bibles/${bibleId}/chapters/ROM.1?`), call);
-    const query = new URLSearchParams((call ?? '').split('?')[1]);
-    assert.equal(query.get('content-type'), 'json');
-    assert.equal(query.get('fums-version'), '3');
-    assert.equal((await csbOf()).copyrightNotice, copyright);
-    assert.deepEqual((await get('/api/content/books?translation=CSB')).json().length, 66);
-
-    const stored = await h.db.query(`SELECT source_ref, fums_token FROM chapters WHERE translation_id = 'CSB'`);
-    assert.deepEqual(stored.rows, [{ source_ref: `apibible:${bibleId}/ROM.1`, fums_token: 'token-ROM.1-1' }]);
-  });
-
-  test('S13.4 a stored chapter is served until it expires, then refetched; if that fails it is not served', async () => {
-    const first = (await get('/api/content/CSB/ROM/1')).json();
-    h.clock.advance(14 * day - 1000);
-    const cached = await get('/api/content/CSB/ROM/1');
-    assert.equal(cached.json().verses[0].text, first.verses[0].text);
-    assert.equal(requests.filter((r) => r.includes('/chapters/')).length, 1);
-
-    h.clock.advance(1000);
-    const refetched = (await get('/api/content/CSB/ROM/1')).json();
-    assert.equal(requests.filter((r) => r.includes('/chapters/')).length, 2);
-    assert.notEqual(refetched.verses[0].text, first.verses[0].text);
-    assert.equal(refetched.expiresAt, new Date(h.clock.now().getTime() + 14 * day).toISOString());
-    assert.notEqual(refetched.fums.token, first.fums.token);
-
-    h.clock.advance(14 * day);
-    mode = 'down';
-    const expired = await get('/api/content/CSB/ROM/1');
-    assert.equal(expired.statusCode, 409);
-    assert.equal(expired.json().error, 'translation_unavailable');
-    assert.equal(expired.json().message, 'API.Bible could not be reached; try again later');
-    assert.equal((await h.db.query(`SELECT 1 FROM chapters WHERE translation_id = 'CSB'`)).rowCount, 0);
-  });
-
-  const chapterCalls = () => requests.filter((r) => r.includes('/chapters/')).length;
-
-  test('S13.4 a chapter API.Bible lacks fails alone, and is not asked for again for a minute', async () => {
-    mode = 'no-chapter';
-    const missing = await get('/api/content/CSB/ROM/1');
-    assert.equal(missing.statusCode, 409);
-    assert.match(missing.json().message, /does not offer this Bible/);
+describe('CSB imported from the owner\'s files (ADR-0008)', () => {
+  test('before any import CSB says how to import it, and needs no key', async () => {
+    assert.deepEqual((await csbOf()).availability, {
+      state: 'unavailable',
+      reason: 'CSB text has not been imported yet. Run import-content --translation CSB --from <CSB folder>.',
+    });
     assert.equal((await get('/api/content/CSB/ROM/1')).statusCode, 409);
-    assert.equal(chapterCalls(), 1);
+  });
+
+  test('an imported chapter is served and its verses, headings and notes are stored as rows', async () => {
+    // Only chapter 1 is in the file, so Romans' other fifteen chapters fail.
+    const summary = await importRomans('Second fixture verse.');
+    assert.deepEqual(summary.counts, { inserted: 1, updated: 0, unchanged: 0, failed: 15 });
     assert.deepEqual((await csbOf()).availability, { state: 'available' });
 
-    mode = 'ok';
-    assert.equal((await get('/api/content/CSB/ROM/2')).statusCode, 200);
-    assert.equal((await get('/api/content/CSB/ROM/1')).statusCode, 409);
-    h.clock.advance(61_000);
-    assert.equal((await get('/api/content/CSB/ROM/1')).statusCode, 200);
-    assert.equal(chapterCalls(), 3);
-  });
-
-  test('S13.4 the request limit holds for every chapter for a minute', async () => {
-    mode = 'limited';
-    const limited = await get('/api/content/CSB/ROM/1');
-    assert.equal(limited.statusCode, 409);
-    assert.equal(limited.json().message, "API.Bible's request limit was reached; try again later");
-    assert.equal((await get('/api/content/CSB/ROM/2')).json().message, "API.Bible's request limit was reached; try again later");
-    assert.equal(chapterCalls(), 1);
-    assert.equal((await csbOf()).availability.state, 'unavailable');
-
-    mode = 'ok';
-    h.clock.advance(61_000);
-    assert.equal((await get('/api/content/CSB/ROM/2')).statusCode, 200);
-    assert.equal(chapterCalls(), 2);
-  });
-
-  test('S13.4 readers asking for one chapter at once share a single request', async () => {
-    const answers = await Promise.all([1, 2, 3].map(() => get('/api/content/CSB/ROM/1')));
-    assert.deepEqual(answers.map((a) => a.statusCode), [200, 200, 200]);
-    assert.equal(chapterCalls(), 1);
-    assert.equal(new Set(answers.map((a) => a.json().fums.token)).size, 1);
-  });
-
-
-  test('an import winning an in-flight API.Bible fetch is shared by all accounts', async () => {
-    const ownerCookie = (await signIn(h, ownerEmail)).cookie;
-    const content = JSON.stringify({ verses: [{ number: 1, text: 'Imported during fetch.' }], headings: [], footnotes: [] });
-    beforeChapterReply = async () => {
-      beforeChapterReply = null;
-      await h.db.query(`INSERT INTO chapters (translation_id, book_id, chapter, verse_count, content, content_sha256, source_ref, fetched_at)
-        VALUES ('CSB', 'ROM', 1, 1, $1, $2, 'synthetic-import', $3)`, [content, sha256Hex(content), h.clock.now()]);
-    };
-    const [reader, allowed] = await Promise.all([
-      get('/api/content/CSB/ROM/1'),
-      h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: ownerCookie } }),
+    const chapter = await get('/api/content/CSB/ROM/1');
+    assert.equal(chapter.statusCode, 200);
+    assert.equal(chapter.headers['cache-control'], 'private, no-cache');
+    const body = chapter.json();
+    assert.equal(body.expiresAt, undefined);
+    assert.equal(body.fums, undefined);
+    assert.deepEqual(body.headings, [
+      { beforeVerse: 1, text: 'Fixture Heading' },
+      { beforeVerse: 3, text: 'Minor Fixture Heading' },
     ]);
-    assert.equal(reader.statusCode, 200);
-    assert.equal(reader.body, allowed.body);
-    assert.equal(allowed.statusCode, 200);
-    assert.equal(allowed.json().verses[0].text, 'Imported during fetch.');
-    assert.equal(allowed.json().expiresAt, null);
-    assert.equal(chapterCalls(), 1);
+    assert.deepEqual(body.footnotes, [
+      { verse: 1, text: 'Cross-reference: 1Co 1:1; 2Co 1:1' },
+      { verse: 2, text: 'Or synthetic' },
+    ]);
+    const manifest = await get('/api/content/CSB/ROM/1/download-manifest');
+    assert.equal(manifest.json().assets[0].sha256, sha256Hex(chapter.body));
+    assert.equal(manifest.json().expiresAt, undefined);
+
+    assert.deepEqual(await rows('verses', 'ref, verse, text'), [
+      { ref: 45_001_001, verse: 1, text: 'Grace fixture verse.' },
+      { ref: 45_001_002, verse: 2, text: 'Second fixture verse.' },
+      { ref: 45_001_003, verse: 3, text: 'Third fixture verse.' },
+    ]);
+    assert.deepEqual(await rows('headings', 'seq, ref, level, text'), [
+      { seq: 1, ref: 45_001_001, level: 1, text: 'Fixture Heading' },
+      { seq: 2, ref: 45_001_003, level: 3, text: 'Minor Fixture Heading' },
+    ]);
+    assert.deepEqual(await rows('verse_notes', 'seq, ref, kind, text, passage'), [
+      { seq: 1, ref: 45_001_001, kind: 'crossref', text: '1Co 1:1; 2Co 1:1', passage: '1Co 1:1; 2Co 1:1' },
+      { seq: 2, ref: 45_001_002, kind: 'footnote', text: 'Or synthetic', passage: null },
+    ]);
+    const found = await h.db.query(`SELECT ref FROM verses WHERE translation_id = 'CSB' AND search @@ plainto_tsquery('english', 'graces')`);
+    assert.deepEqual(found.rows, [{ ref: 45_001_001 }]);
+    // A passage is a ref range: Romans 1:2-3.
+    const passage = await h.db.query(`SELECT verse FROM verses WHERE translation_id = 'CSB' AND ref BETWEEN 45001002 AND 45001003 ORDER BY ref`);
+    assert.deepEqual(passage.rows, [{ verse: 2 }, { verse: 3 }]);
   });
 
-  test("importing the owner's CSB files replaces an API.Bible copy with one that never expires", async () => {
-    const cachedCopy = (await get('/api/content/CSB/ROM/1')).json();
-    assert.notEqual(cachedCopy.expiresAt, null);
+  test('re-importing unchanged files changes nothing; changed text replaces the rows with it', async () => {
+    await importRomans('Second fixture verse.');
+    const first = (await get('/api/content/CSB/ROM/1')).body;
+    assert.deepEqual((await importRomans('Second fixture verse.')).counts, { inserted: 0, updated: 0, unchanged: 1, failed: 15 });
+    assert.equal((await get('/api/content/CSB/ROM/1')).body, first);
+    assert.equal((await rows('verses', 'ref')).length, 3);
 
-    const dir = await mkdtemp(join(tmpdir(), 'csb-import-'));
-    try {
-      // Synthetic markup in the files' shape. Only chapter 1 is in it, so the other fifteen fail.
-      await writeFile(
-        join(dir, '45-Rom.xml'),
-        `<book id="bk.45"><chapter id="romans.1" display="1"><p><verse reference="romans.1.1" display-number="1"><sup class="verse-ref" id="romans.1.1">1</sup>Imported fixture verse.</verse></p></chapter></book>`,
-      );
-      const summary = await importText({ db: h.db, clock: h.clock, text: createCsbFileSource(dir) }, { translationId: 'CSB', books: ['ROM'] });
-      assert.deepEqual(summary.counts, { inserted: 0, updated: 1, unchanged: 0, failed: 15 });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-
-    const readerCookie = cookie;
-    cookie = (await signIn(h, ownerEmail)).cookie;
-    h.clock.advance(30 * day);
-    mode = 'down';
-    const [imported, reader] = await Promise.all([
-      get('/api/content/CSB/ROM/1'),
-      h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1', cookies: { bs_session: readerCookie } }),
-    ]);
-    assert.equal(reader.statusCode, 200);
-    assert.equal(reader.body, imported.body);
-    const manifest = await h.app.inject({ method: 'GET', url: '/api/content/CSB/ROM/1/download-manifest', cookies: { bs_session: readerCookie } });
-    assert.equal(manifest.statusCode, 200);
-    assert.equal(manifest.json().assets[0].sha256, sha256Hex(reader.body));
-    assert.equal(imported.statusCode, 200);
-    assert.equal(imported.json().expiresAt, null);
-    assert.equal(imported.json().fums, undefined);
-    assert.deepEqual(imported.json().verses, [{ number: 1, text: 'Imported fixture verse.' }]);
-    assert.equal(chapterCalls(), 1);
+    assert.deepEqual((await importRomans('A corrected second verse.')).counts, { inserted: 0, updated: 1, unchanged: 0, failed: 15 });
+    assert.deepEqual((await rows('verses', 'text')).map((r) => r.text), ['Grace fixture verse.', 'A corrected second verse.', 'Third fixture verse.']);
+    assert.equal((await rows('verse_notes', 'ref')).length, 2);
+    assert.equal((await get('/api/content/CSB/ROM/1')).json().verses[1].text, 'A corrected second verse.');
   });
 
   test('S13.5 CSB narration is unavailable: no licensed CSB recording', async () => {

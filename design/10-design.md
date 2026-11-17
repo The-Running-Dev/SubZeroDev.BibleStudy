@@ -82,12 +82,20 @@ All server entities are persisted in PostgreSQL unless marked *in-memory*. Ident
 ### Content
 
 **Translation**
-- Fields: `id` (`BSB`, `CSB`), `name`, `sourceKind` (`aolab` | `files` | `apibible`), `edition` (source's version identifier and checksum), `licenseSummary`, `copyrightNotice`, `availability` (`available` | `not_configured` | `unavailable`), `availabilityReason`.
-- Rows are seeded by migration. Availability is derived from stored content and source configuration. All signed-in readers see the same imported CSB, including accounts without a group and instances without `OWNER_EMAIL` (ADR-0004). API.Bible is an optional independent source for chapters not imported.
+- Fields: `id` (`BSB`, `CSB`), `name`, `sourceKind` (`aolab` | `files`), `edition` (source's version identifier and checksum), `licenseSummary`, `copyrightNotice`, `availability` (`available` | `unavailable`), `availabilityReason`.
+- Rows are seeded by migration. Availability is derived from stored content. All signed-in readers see the same imported CSB, including accounts without a group and instances without `OWNER_EMAIL` (ADR-0004). CSB and ESV come only from the owner's imported files; no key is used (ADR-0008).
 
 **Chapter**
-- Fields: `translationId`, `bookId` (USFM code, e.g. `ROM`), `chapter`, `verseCount`, `content` (JSON: ordered verse texts plus headings and footnotes as the source provides them), `contentSha256`, `sourceRef`, `fetchedAt`, `expiresAt` (null for BSB and imported CSB; fetchedAt + 14 days for API.Bible CSB).
+- Fields: `translationId`, `bookId` (USFM code, e.g. `ROM`), `chapter`, `verseCount`, `content` (JSON: ordered verse texts plus headings and footnotes as the source provides them), `contentSha256`, `sourceRef`, `fetchedAt`. Imported text never expires.
 - Primary key is `(translationId, bookId, chapter)`.
+- `content` is the served copy (I-10). Each import also writes the chapter's verses, headings and notes as rows (ADR-0008).
+
+**Canon, Verse, Heading, VerseNote**
+- `canon`: the 66 books in canon order, seeded; a verse `ref` is `BBCCCVVV` in that order.
+- `verses`: `(translationId, ref)`, `bookId`, `chapter`, `verse`, `text`, and a generated English full-text `search` vector. A passage is a `ref` range.
+- `headings`: `seq`, the `ref` it precedes, `level` (1 major, 2 or 3 minor; null when the source has none), `text`.
+- `verse_notes`: `seq`, `ref`, `kind` (`footnote` | `crossref`), `text`, and the cross-referenced `passage` when given.
+- Verses, headings and notes are rewritten with their chapter in one transaction and deleted with it.
 
 **Narrator**
 - Fields: `id` (source key, e.g. `souer`), `displayName`, `translationId`, `license`, `licenseSource`, `enabled`.
@@ -428,11 +436,6 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 - System: per-chapter retry three times, then that chapter is `failed` in the manifest; text already imported stays.
 - Users see: only the importer operator sees it; members see "Preparing narration failed — try later" for on-demand audio.
 
-**API.Bible key missing, revoked, over quota or CSB access not granted**
-- Detected by: configuration check or 401/403/429.
-- System: CSB availability becomes `not_configured` or `unavailable` with the reason. Stored CSB text is shown until its `expiresAt`, never after.
-- Users see: CSB stays selectable, and the reader shows the reason, for example "API.Bible rejected the key" (D-2026-10-30-04).
-
 **Skynet connector offline**
 - Detected by: no link, or no heartbeat for 30 s.
 - System: the assistant reports `offline`, and new turns are refused (not queued).
@@ -530,7 +533,7 @@ Commands queued while disconnected are dropped, never replayed (DOD-11, DOD-26).
 
 4. **CSB text.**
    - Chosen: Ben's scraped XML imports, stored persistently and shared with every signed-in reader. Content access does not depend on group membership or `OWNER_EMAIL` (ADR-0004). Licensing approval is outside engineering acceptance; no legal determination is made.
-   - Optional: API.Bible for chapters not imported, retaining its independent configuration, 14-day cache expiry, copyright notice and Fair Use reporting. CSB has no narration.
+   - API.Bible is removed (ADR-0008): every CSB chapter comes from the imported files, so no key, expiry or Fair Use reporting applies. CSB has no narration.
 
    - Rejected: dropping CSB. It is required by DOD-12.
    - Rejected: a paid licence. The owner declined paying.

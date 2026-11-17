@@ -38,7 +38,7 @@ These are account and server settings, so they are the owner's to make. Nothing 
    docker exec -u 0 "$app" rm -rf /tmp/CSB && rm -rf /tmp/CSB
    ```
 
-   Every signed-in reader can read/download the same imported text. Offline downloads remain stored separately per account, as for BSB; imported-only account scopes are no longer enforced and unscoped copies are no longer purged. Older installed clients must update to use the shared policy. Copies already purged by an older client can be downloaded again. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported CSB chapter never expires and is never replaced by an API.Bible fetch; re-running the import changes only chapters whose text changed.
+   Every signed-in reader can read/download the same imported text. Offline downloads remain stored separately per account, as for BSB; imported-only account scopes are no longer enforced and unscoped copies are no longer purged. Older installed clients must update to use the shared policy. Copies already purged by an older client can be downloaded again. Verify the deployed `/__build-id` and update installed clients before reporting enforcement. The text lives in Postgres from then on, so it survives redeploys and is in the backups. An imported chapter never expires; re-running the import changes only chapters whose text changed. After migration 0014, re-import CSB and ESV once to fill heading levels and cross-reference passages (ADR-0008).
 
 8. **Import ESV once from the downloaded JSON files.** Copy the `bibles/ESV` folder into the app container, then run:
    ```bash

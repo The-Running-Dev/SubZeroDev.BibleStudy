@@ -71,12 +71,12 @@ test('one local ESV import makes text available without a key, with stable hashe
   assert.deepEqual(chapter.verses.map((v: { number: number }) => v.number), [1, 3]);
   assert.equal(chapter.verseCount, 3);
   assert.equal(chapter.footnotes.length, 3);
-  assert.equal(chapter.expiresAt, null);
+  assert.equal(chapter.expiresAt, undefined);
   assert.equal(chapter.fums, undefined);
   const stored = (await h.db.query("SELECT content, content_sha256 FROM chapters WHERE translation_id = 'ESV'")).rows[0];
   assert.equal(sha256Hex(stored.content), chapter.contentSha256);
   const manifest = (await get('/api/content/ESV/PHM/1/download-manifest')).json();
-  assert.equal(manifest.expiresAt, null);
+  assert.equal(manifest.expiresAt, undefined);
   assert.equal(manifest.assets[0].sha256, sha256Hex(response.body));
   assert.equal(manifest.totalBytes, Buffer.byteLength(response.body));
   assert.deepEqual((await get('/api/content/ESV/PHM/1/recordings')).json(), { recordings: [], preparing: [], failed: [] });
@@ -87,7 +87,7 @@ test('one local ESV import makes text available without a key, with stable hashe
   // Imported text has no expiry even a year later; use the content service independently of login expiry.
   const { getChapter } = await import('../../src/server/content/catalog.ts');
   h.clock.advance(365 * 24 * 60 * 60 * 1000);
-  assert.equal((await getChapter(h.db, 'ESV', 'PHM', 1, null)).body, response.body);
+  assert.equal((await getChapter(h.db, 'ESV', 'PHM', 1)).body, response.body);
   h.clock.advance(-365 * 24 * 60 * 60 * 1000);
 });
 

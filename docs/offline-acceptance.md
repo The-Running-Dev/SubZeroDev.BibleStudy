@@ -8,11 +8,11 @@ After `npm ci`, `npx playwright install chromium` and `npm run build`:
 node --test tests/e2e/download-integrity.test.ts
 ```
 
-This suite uses the production client and service worker with synthetic HTTP chapter/audio responses. It needs no PostgreSQL, SMTP, API.Bible key or AO Lab access. It checks cold offline startup after fully closing the browser, text-only and narrated chapters, actual audio decoding and verse following, a network cut halfway through audio, digest failures, transaction aborts after request success, unavailable content, CSB expiration, and preservation of offline notes and their pending operations when downloads are removed.
+This suite uses the production client and service worker with synthetic HTTP chapter/audio responses. It needs no PostgreSQL, SMTP or AO Lab access. It checks cold offline startup after fully closing the browser, text-only and narrated chapters, actual audio decoding and verse following, a network cut halfway through audio, digest failures, transaction aborts after request success, unavailable content, legacy expired downloads, and preservation of offline notes and their pending operations when downloads are removed.
 
 The cold-start check disables browser networking and stops the origin server as well: some Chromium versions allow a service worker's fetch to bypass Playwright's context offline setting. The interruption check also closes the origin's open connections after disabling networking, so an already open stream really ends.
 
-The existing `tests/e2e/offline.test.ts` covers server-generated manifests, imported content, persistent profiles and install guidance. Run it with the repository's PostgreSQL and Mailpit services and upstream content access, or run `npm run test:e2e` for all browser suites. Synthetic responses do not validate real API.Bible authorization or licensing access.
+The existing `tests/e2e/offline.test.ts` covers server-generated manifests, imported content, persistent profiles and install guidance. Run it with the repository's PostgreSQL and Mailpit services and upstream content access, or run `npm run test:e2e` for all browser suites.
 
 ## Physical devices — not performed
 

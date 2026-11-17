@@ -6,14 +6,12 @@ import type { Clock } from '../platform/clock.ts';
 import type { Db } from '../platform/db.ts';
 import { AppError } from '../platform/errors.ts';
 import { getChapter } from './catalog.ts';
-import type { Csb } from './catalog.ts';
 import { listRecordings } from './narration.ts';
 
 export interface DownloadDeps {
   db: Db;
   clock: Clock;
   mediaDir: string;
-  csb: Csb | null;
 }
 
 export async function downloadManifest(
@@ -23,7 +21,7 @@ export async function downloadManifest(
   chapter: number,
   withNarration: boolean,
 ): Promise<DownloadManifest & { queued: boolean }> {
-  const stored = await getChapter(deps.db, translationId, bookId, chapter, deps.csb);
+  const stored = await getChapter(deps.db, translationId, bookId, chapter);
   const assets: DownloadManifest['assets'] = [
     {
       url: `/api/content/${translationId}/${bookId}/${chapter}`,
@@ -45,5 +43,5 @@ export async function downloadManifest(
     }
     assets.push({ url: recording.mediaUrl, sha256: recording.mediaSha256, bytes: recording.bytes, kind: 'audio' });
   }
-  return { assets, totalBytes: assets.reduce((sum, a) => sum + a.bytes, 0), expiresAt: stored.expiresAt, queued };
+  return { assets, totalBytes: assets.reduce((sum, a) => sum + a.bytes, 0), queued };
 }

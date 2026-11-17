@@ -56,7 +56,7 @@ test('every signed-in account receives identical imported chapters, catalogs and
   const expectedManifest = await get(`${chapterUrl}/download-manifest`, owner.cookie);
   assert.equal(expectedChapter.statusCode, 200);
   assert.equal(expectedChapter.json().verses[0].text, importedText);
-  assert.equal(expectedChapter.json().expiresAt, null);
+  assert.equal(expectedChapter.json().expiresAt, undefined);
   assert.equal(expectedChapter.json().restrictedToUserId, undefined);
   assert.equal(expectedManifest.json().restrictedToUserId, undefined);
   assert.equal(expectedManifest.json().assets[0].sha256, sha256Hex(expectedChapter.body));
@@ -68,7 +68,7 @@ test('every signed-in account receives identical imported chapters, catalogs and
       assert.equal(response.statusCode, 200);
       assert.equal(response.body, expectedChapter.body);
       assert.equal(response.headers.etag, expectedChapter.headers.etag);
-      assert.equal(response.headers['cache-control'], 'private, no-store');
+      assert.equal(response.headers['cache-control'], 'private, no-cache');
       assert.equal((await get(url, user.cookie, { 'if-none-match': String(expectedChapter.headers.etag) })).statusCode, 304);
       const head = await h.app.inject({ method: 'HEAD', url, cookies: { bs_session: user.cookie } });
       assert.equal(head.statusCode, 200);
@@ -102,7 +102,7 @@ test('imported content needs neither a configured owner nor group membership; ob
         assert.equal((await get(chapterUrl, user.cookie)).statusCode, 200);
         assert.equal((await get(`${chapterUrl}/download-manifest`, user.cookie)).statusCode, 200);
       }
-      const internal = await getChapter(h.db, 'CSB', 'ROM', 1, null);
+      const internal = await getChapter(h.db, 'CSB', 'ROM', 1);
       assert.equal(JSON.parse(internal.body).verses[0].text, importedText);
     }
   } finally { h.config.ownerEmail = original; }

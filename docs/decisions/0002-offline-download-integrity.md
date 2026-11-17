@@ -20,7 +20,7 @@ S14 and S15 are already implemented on main by PRs #17 and #18. S14 follow-up wo
 
 Rechecking stored audio costs a digest calculation when checking or opening downloads. Removing downloads touches neither notes nor pending sync operations. Content expiry still uses the device wall clock; intentional clock manipulation and server-verified offline leases are not introduced by this slice.
 
-Synthetic browser tests exercise real service workers, IndexedDB transactions, cache integrity, audio decoding and offline startup without an API.Bible key or upstream imports. They complement the existing database/import tests. Browser simulations do not satisfy physical iPhone or Android acceptance.
+Synthetic browser tests exercise real service workers, IndexedDB transactions, cache integrity, audio decoding and offline startup without upstream imports. They complement the existing database/import tests. Browser simulations do not satisfy physical iPhone or Android acceptance.
 
 ## Alternatives considered
 

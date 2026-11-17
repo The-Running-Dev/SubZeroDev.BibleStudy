@@ -42,7 +42,7 @@ const xml = `<?xml version="1.0" encoding="utf-8"?>
 </book>`;
 
 describe('CSB files', () => {
-  test('a book parses into verses, headings and footnotes', () => {
+  test('a book parses into verses, levelled headings, footnotes and cross references', () => {
     const book = parseCsbBook(xml);
     assert.equal(book.order, 45);
     assert.equal(book.name, 'Fixture Book');
@@ -50,7 +50,7 @@ describe('CSB files', () => {
       book.chapters.map((c) => c.chapter),
       [1, 2, 3],
     );
-    assert.deepEqual(book.chapters[0].content, {
+    assert.deepEqual(book.chapters[0].text, {
       verses: [
         { number: 1, text: 'Verse one names the LORD—and GOD plainly.' },
         { number: 2, text: 'Verse two begins here and ends after the heading.' },
@@ -58,19 +58,20 @@ describe('CSB files', () => {
         { number: 4, text: 'It measured 22 1/2 fixtures.' },
       ],
       headings: [
-        { beforeVerse: 1, text: 'First Fixture Heading' },
-        { beforeVerse: 3, text: 'Second Fixture Heading' },
+        { beforeVerse: 1, level: 1, text: 'First Fixture Heading' },
+        { beforeVerse: 3, level: 2, text: 'Second Fixture Heading' },
       ],
-      footnotes: [
-        { verse: 2, text: 'Or ‘fixture’' },
-        { verse: 4, text: 'A synthetic note.' },
+      notes: [
+        { verse: 1, kind: 'crossref', text: 'Gn 1:1', passage: 'Gn 1:1' },
+        { verse: 2, kind: 'footnote', text: 'Or ‘fixture’', passage: null },
+        { verse: 4, kind: 'footnote', text: 'A synthetic note.', passage: null },
       ],
     });
   });
 
   test('a misspelt reference is read, a table verse runs from its marker, and the chapter label is not text', () => {
     const [, two] = parseCsbBook(xml).chapters;
-    assert.deepEqual(two.content, {
+    assert.deepEqual(two.text, {
       verses: [
         { number: 1, text: 'Chapter two, verse one.' },
         { number: 2, text: 'Verse two, misspelt.' },
@@ -78,13 +79,13 @@ describe('CSB files', () => {
         { number: 4, text: 'the last row one' },
       ],
       headings: [],
-      footnotes: [],
+      notes: [],
     });
   });
 
   test("a verse's number marker outranks its element's reference, and stray spacing is tidied", () => {
     const three = parseCsbBook(xml).chapters[2];
-    assert.deepEqual(three.content.verses, [
+    assert.deepEqual(three.text.verses, [
       { number: 1, text: 'One, then two arrives early.' },
       { number: 2, text: 'Two is inside one.' },
       { number: 3, text: 'Three quotes an old line, then, pauses . . . and ends here.' },

@@ -15,3 +15,5 @@ Keep progress, stored chapters and cross-window download locks separate by accou
 ## Consequences
 
 No server changes, new imports or credentials are needed for already imported content. Existing CSB source behavior remains: imported chapters do not expire, while API.Bible chapters retain their expiry and availability requirements. A missing source stops the download with an error and keeps completed chapters; a partial source cannot be reported as an entire saved Bible. Device storage and browser eviction limits remain unchanged.
+
+API.Bible was later removed: see [ADR-0008](0008-verse-tables.md).

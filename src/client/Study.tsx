@@ -5,7 +5,6 @@ import { adjacentChapter, bookById } from '../shared/books.ts';
 import { verseAtSeconds } from '../shared/playback.ts';
 import { formatReference, parseReference } from '../shared/reference.ts';
 import { ApiFailure, api, messageFor } from './api.ts';
-import { reportFums } from './fums.ts';
 import { connectLive } from './live.ts';
 import type { Live, LiveStatus } from './live.ts';
 import { Passage } from './Passage.tsx';
@@ -531,12 +530,6 @@ function StudyPassage(props: {
       current = false;
     };
   }, [translationId, bookId, chapter]);
-
-  // S13.6: each display of CSB text is reported to API.Bible.
-  const fumsToken = text.kind === 'ready' ? text.chapter.fums?.token : undefined;
-  useEffect(() => {
-    if (fumsToken) reportFums(fumsToken, props.userId);
-  }, [fumsToken, text, props.userId]);
 
   function jump(event: FormEvent) {
     event.preventDefault();

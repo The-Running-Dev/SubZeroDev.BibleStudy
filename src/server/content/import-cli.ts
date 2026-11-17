@@ -4,7 +4,7 @@
 // Run inside the app container (or locally with DATABASE_URL set). Prints the manifest summary.
 // --audio alone imports recordings only (their chapters' text must already be imported);
 // with --books, or with neither flag, the text is imported first.
-// CSB is read from the owner's folder of NN-Book.xml files; an imported CSB chapter never expires.
+// CSB is read from the owner's folder of NN-Book.xml files; imported text is kept (ADR-0008).
 import { parseArgs } from 'node:util';
 import { contentSettings } from '../platform/config.ts';
 import { systemClock } from '../platform/clock.ts';
