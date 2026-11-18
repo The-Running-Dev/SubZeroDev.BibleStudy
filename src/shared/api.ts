@@ -19,7 +19,6 @@ export interface PassageRef {
 
 export type Availability =
   | { state: 'available' }
-  | { state: 'not_configured'; reason: string }
   | { state: 'unavailable'; reason: string };
 
 export type ErrorCode =
@@ -105,8 +104,6 @@ export interface ChapterView extends ChapterContent {
   chapter: number;
   verseCount: number;
   contentSha256: string;
-  expiresAt: IsoInstant | null;
-  fums?: { token: string };
 }
 
 export type RecordingTiming = { status: 'verified'; verseStarts: number[] } | { status: 'absent' | 'rejected'; reason: string };
@@ -127,7 +124,6 @@ export interface RecordingView {
 export interface DownloadManifest {
   assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[];
   totalBytes: number;
-  expiresAt: IsoInstant | null;
 }
 
 // `preparing` lists narrators whose recording is being fetched on first request; poll again after 5 s.

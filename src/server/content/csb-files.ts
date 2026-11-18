@@ -3,9 +3,9 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChapterContent } from '../../shared/api.ts';
 import { books as canon } from '../../shared/books.ts';
 import type { TextBook, TextSource } from './import.ts';
+import type { ChapterText } from './text.ts';
 
 interface Tag {
   name: string;
@@ -46,8 +46,10 @@ const skippedTags = new Set(['bookname', 'psalm', 'notereference']);
 const lineTags = new Set(['poem', 'poemright', 'item', 'row']);
 const inlineTags = new Set(['span', 'em', 'i', 'smallcaps', 'sub', 'sup', 'a', 'note', 'notereference', 'redletter-start', 'redletter-end', 'hr', 'otquote']);
 const boundary = (name: string) => (lineTags.has(name) ? '\n' : inlineTags.has(name) ? '' : ' ');
-// Superscripts holding a translator's note; cross references and quotation sources are left out.
+// Superscripts holding a translator's note, and those holding cross references; quotation sources are left out.
 const noteClass = /\b(translate-note|alt-reading-note|alt-reading|clarifying-note|help-note)\b/;
+const crossRefClass = /\bcross-ref\b/;
+const headingLevels: Record<string, number> = { head1: 1, head2: 2, head3: 3 };
 
 // The files' line breaks put a space before some punctuation, and leave a stray '>' in a few verses. An ellipsis
 // (". . .") keeps its spaces.
@@ -66,7 +68,7 @@ const typographic = /[\u2009\u200A\u200B\u2060\uFEFF]/g;
 
 export interface ParsedChapter {
   chapter: number;
-  content: ChapterContent;
+  text: ChapterText;
   chapterId: string;
 }
 
@@ -82,19 +84,19 @@ export function parseCsbBook(xml: string): ParsedBook {
   let order = 0;
   let name = '';
   const chapters: ParsedChapter[] = [];
-  let chapter: { number: number; id: string; texts: Map<number, string>; headings: ChapterContent['headings']; footnotes: ChapterContent['footnotes'] } | null = null;
+  let chapter: { number: number; id: string; texts: Map<number, string>; headings: ChapterText['headings']; notes: ChapterText['notes'] } | null = null;
   let verse: number | null = null;
   // A <verse> element whose reference was copied from an earlier verse: its number marker names the real one, and
   // the elements continuing it carry the same stale reference.
   let stale = null as { reference: number; verse: number } | null;
   // In a table a verse is an empty <verse/> marking where it starts; it runs to the next verse or the table's end.
   let milestoneDepth: number | null = null;
-  let pending: string[] = [];
-  let heading: string | null = null;
+  let pending: { level: number | null; text: string }[] = [];
+  let heading: { level: number | null; text: string } | null = null;
   let note: string | null = null;
   let bookName: string | null = null;
   // Depths of the open elements whose text is not verse text, and of small capitals.
-  const stack: { name: string; skip: boolean; caps: boolean; noteSup: boolean }[] = [];
+  const stack: { name: string; skip: boolean; caps: boolean; noteSup: 'footnote' | 'crossref' | null }[] = [];
   const skipping = () => stack.some((s) => s.skip);
   const caps = () => stack.some((s) => s.caps);
 
@@ -108,7 +110,7 @@ export function parseCsbBook(xml: string): ParsedBook {
     if (!chapter) return;
     verse = number;
     if (chapter.texts.has(number)) return append(' ');
-    for (const text of pending) chapter.headings.push({ beforeVerse: number, text });
+    for (const h of pending) chapter.headings.push({ beforeVerse: number, level: h.level, text: h.text });
     pending = [];
     chapter.texts.set(number, '');
   };
@@ -118,7 +120,7 @@ export function parseCsbBook(xml: string): ParsedBook {
       .sort((a, b) => a[0] - b[0])
       .map(([number, text]) => ({ number, text: tidy(text) }))
       .filter((v) => v.text.length > 0);
-    chapters.push({ chapter: chapter.number, chapterId: chapter.id, content: { verses, headings: chapter.headings, footnotes: chapter.footnotes } });
+    chapters.push({ chapter: chapter.number, chapterId: chapter.id, text: { verses, headings: chapter.headings, notes: chapter.notes } });
     chapter = null;
   };
 
@@ -128,7 +130,7 @@ export function parseCsbBook(xml: string): ParsedBook {
       if (skipping()) continue;
       const text = (caps() ? token.text.toUpperCase() : token.text).replace(typographic, '').replace(/\s+/g, ' ');
       if (note !== null) note += text;
-      else if (heading !== null) heading += text;
+      else if (heading !== null) heading.text += text;
       else append(text);
       continue;
     }
@@ -139,11 +141,11 @@ export function parseCsbBook(xml: string): ParsedBook {
         name = tidy(bookName ?? '');
         bookName = null;
       } else if (headingTags.has(open.name) && heading !== null) {
-        const text = tidy(heading);
-        if (text) pending.push(text);
+        const text = tidy(heading.text);
+        if (text) pending.push({ level: heading.level, text });
         heading = null;
       } else if (open.name === 'note' && note !== null) {
-        if (verse !== null && chapter && tidy(note)) chapter.footnotes.push({ verse, text: tidy(note) });
+        if (verse !== null && chapter && tidy(note)) chapter.notes.push({ verse, kind: 'footnote', text: tidy(note), passage: null });
         note = null;
       } else if (open.name === 'verse') verse = null;
       if (milestoneDepth !== null && stack.length <= milestoneDepth) {
@@ -156,7 +158,7 @@ export function parseCsbBook(xml: string): ParsedBook {
     }
 
     const { tag, selfClosing } = token;
-    const parentNoteSup = stack.at(-1)?.noteSup ?? false;
+    const parentNoteSup = stack.at(-1)?.noteSup ?? null;
     if (tag.name === 'book') {
       const match = /^bk\.(\d+)$/.exec(tag.attrs.id ?? '');
       if (!match) throw new Error('the <book> element has no bk.NN id');
@@ -165,7 +167,7 @@ export function parseCsbBook(xml: string): ParsedBook {
       finishChapter();
       const number = Number(tag.attrs.display);
       if (!Number.isInteger(number) || number < 1) throw new Error(`chapter ${tag.attrs.id ?? '?'} has no display number`);
-      chapter = { number, id: tag.attrs.id ?? String(number), texts: new Map(), headings: [], footnotes: [] };
+      chapter = { number, id: tag.attrs.id ?? String(number), texts: new Map(), headings: [], notes: [] };
       pending = [];
     } else if (tag.name === 'verse') {
       // A few verses in the files name their reference in an id, or in a misspelt attribute.
@@ -184,11 +186,12 @@ export function parseCsbBook(xml: string): ParsedBook {
         enterVerse(stale.verse);
       }
     } else if (tag.name === 'bookname') bookName = '';
-    else if (headingTags.has(tag.name)) heading = '';
+    else if (headingTags.has(tag.name)) heading = { level: headingLevels[tag.name] ?? null, text: '' };
     else if (tag.name === 'note') note = '';
     else if (parentNoteSup && tag.name === 'a' && tag.attrs['data-content'] && verse !== null && chapter) {
       const text = tidy(tag.attrs['data-content'].replace(typographic, ''));
-      if (text) chapter.footnotes.push({ verse, text });
+      // A cross reference's content is the passages it points to ("Ps 90:2; Jn 1:1").
+      if (text) chapter.notes.push({ verse, kind: parentNoteSup, text, passage: parentNoteSup === 'crossref' ? text : null });
     }
     if (selfClosing) continue;
     // A superscript without a class is a fraction's numerator (22 <sup>1</sup>/<sub>2</sub>), set off by a thin space.
@@ -198,7 +201,7 @@ export function parseCsbBook(xml: string): ParsedBook {
       name: tag.name,
       skip: (tag.name === 'sup' && !numerator) || skippedTags.has(tag.name),
       caps: tag.name === 'smallcaps' || (tag.name === 'span' && /\bsmallcaps\b/.test(tag.attrs.class ?? '')),
-      noteSup: tag.name === 'sup' && noteClass.test(tag.attrs.class ?? ''),
+      noteSup: tag.name !== 'sup' ? null : noteClass.test(tag.attrs.class ?? '') ? 'footnote' : crossRefClass.test(tag.attrs.class ?? '') ? 'crossref' : null,
     });
   }
   if (stack.length) throw new Error(`<${stack.at(-1)!.name}> is never closed`);
@@ -260,8 +263,8 @@ export function createCsbFileSource(dir: string): TextSource {
       const { book, file } = await parsed.get(bookId)!;
       const found = book.chapters.find((c) => c.chapter === number);
       if (!found) throw new Error(`${file.name} has no chapter ${number}`);
-      if (found.content.verses.length === 0) throw new Error(`${file.name} chapter ${number} has no verses`);
-      return { content: found.content, sourceRef: `csb-file:${file.name}#${found.chapterId}` };
+      if (found.text.verses.length === 0) throw new Error(`${file.name} chapter ${number} has no verses`);
+      return { text: found.text, sourceRef: `csb-file:${file.name}#${found.chapterId}` };
     },
   };
 }

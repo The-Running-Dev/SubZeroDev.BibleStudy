@@ -14,7 +14,6 @@ The narrow path in the brief is S1–S5 and S8–S9. The solo path adds S6 and S
 **Owner-side prerequisites.** Some criteria need things only the owner can provide:
 
 - an SMTP app password;
-- an API.Bible key;
 - DNS, the proxy route and the deploy webhook;
 - real phones.
 
@@ -59,7 +58,7 @@ Acceptance:
   - S2.4 A new user's first screen shows Romans 1 with the reference visible.
   - S2.5 The book and chapter selectors, previous/next chapter and reference entry reach Romans 2 and 3 and back. At Romans 16, next goes to 1 Corinthians 1.
   - S2.6 Jumping to `Romans 3:12` scrolls verse 12 into view and marks it.
-  - S2.7 `GET /api/content/translations` lists BSB `available` and CSB `not_configured` with a reason. Choosing CSB shows "CSB text not available from a licensed source" and no text.
+  - S2.7 `GET /api/content/translations` lists BSB `available` and CSB `unavailable` with a reason until it is imported. Choosing CSB shows "CSB text not available from a licensed source" and no text.
 Out of scope: audio (S3); CSB fetching (S13); personal display translation (S12).
 
 ## S3 — Listen to a chapter with the verse highlighted
@@ -220,7 +219,7 @@ Acceptance:
 Out of scope: offline saving and conflicts (S15).
 
 ## S13 — Read CSB when the owner's key is set
-Status: done
+Status: superseded by ADR-0008 (CSB is imported from the owner's files; API.Bible, expiry and Fair Use reporting are removed). S13.5 still holds.
 Delivers: Once the owner adds their free API.Bible key, members can read the CSB, with its copyright notice shown and the text refreshed as the licence requires. Without the key they are told why it is missing.
 Touches: content (CSB source, expiry, FUMS token), client reader
 Depends on: S2
@@ -321,7 +320,7 @@ Depends on: S13, S14, S18, PR #24
 Acceptance:
   - S19.1 Signed-out content requests return 401, including encoded, HEAD and conditional requests.
   - S19.2 Owner, ordinary member and solo accounts receive identical imported chapter bodies, ETags, catalogs and manifests. Missing or mismatched OWNER_EMAIL does not restrict scripture access; obsolete CSB_IMPORTED_ACCESS values are ignored.
-  - S19.3 Imports remain persistent and take precedence over API.Bible for every reader; BSB and expiring API.Bible rows retain their behavior, including concurrent fetch/import handling.
+  - S19.3 Imports remain persistent for every reader (API.Bible was later removed by ADR-0008).
   - S19.4 Unscoped imports can be downloaded and read offline; valid legacy scoped copies also remain readable. Device storage stays keyed by account. Existing private-data and assistant-use permissions remain intact.
   - S19.5 Record supplied scraped-XML provenance without a legal determination or licence-document engineering gate. Verify deployed revision separately from CI. See ADR-0004.
 Out of scope: anonymous public content routes, changing group controls or private-data permissions, recalling exported files, deploying outside the established merge workflow.

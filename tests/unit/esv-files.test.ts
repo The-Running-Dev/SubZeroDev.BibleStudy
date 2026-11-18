@@ -9,9 +9,11 @@ import { esvChapter, writeEsvFixture } from '../support/esv-fixture.ts';
 test('ESV preserves verse gaps, poetry, headings and both kinds of annotation', () => {
   assert.deepEqual(parseEsvChapter(esvChapter(), 57, 1), {
     verses: [{ number: 1, text: 'First fixture line.\nSecond fixture line.' }, { number: 3, text: 'Final fixture verse.' }],
-    headings: [{ beforeVerse: 1, text: 'Fixture heading' }],
-    footnotes: [
-      { verse: 1, text: 'Alternative reading' }, { verse: 1, text: 'Cross-reference: Fixture 2:1' }, { verse: 1, text: 'Heading note' },
+    headings: [{ beforeVerse: 1, level: 2, text: 'Fixture heading' }],
+    notes: [
+      { verse: 1, kind: 'footnote', text: 'Alternative reading', passage: null },
+      { verse: 1, kind: 'crossref', text: 'Fixture 2:1', passage: 'Fixture 2:1' },
+      { verse: 1, kind: 'footnote', text: 'Heading note', passage: null },
     ],
   });
 });

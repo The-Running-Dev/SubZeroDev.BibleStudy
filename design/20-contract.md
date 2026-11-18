@@ -28,7 +28,7 @@ Each invariant names the module that maintains it.
 
 ### content
 - **I-10** A Chapter's `contentSha256` is the SHA-256 of its stored `content`, and the API serves that content unchanged.
-- **I-11** A CSB Chapter cached from API.Bible is never served when `now ≥ expiresAt`. Imported CSB is persistent (`expiresAt` null), never overwritten by an API fetch, and shared identically with every signed-in reader. Catalogs, chapter bodies/validators and manifests do not depend on `OWNER_EMAIL` or group membership. Offline copies use normal per-account storage without imported-only scope checks. Existing assistant-use permissions remain separate. See ADR-0004.
+- **I-11** Imported text (BSB, CSB, ESV) is persistent and shared identically with every signed-in reader. A chapter's `verses`, `headings` and `notes` rows always derive from its current `content`: an import writes all of them in one transaction. Catalogs, chapter bodies/validators and manifests do not depend on `OWNER_EMAIL` or group membership. Offline copies use normal per-account storage without imported-only scope checks. Existing assistant-use permissions remain separate. See ADR-0004 and ADR-0008.
 - **I-12** A Recording is only served for the translation in its `translationId`. The media bytes served hash to `mediaSha256`.
 - **I-13** Recording `timing` is used for verse following only when `timingStatus = 'verified'`.
   - `verified` means exactly `verseCount` strictly increasing values, all `< durationSeconds`.
@@ -90,7 +90,6 @@ interface PassageRef { bookId: BookId; chapter: number; startVerse: number | nul
 
 type Availability =
   | { state: 'available' }
-  | { state: 'not_configured'; reason: string }
   | { state: 'unavailable'; reason: string };
 
 type ApiError = { error: ErrorCode; message: string; retryable: boolean; details?: Record<string, unknown> };
@@ -201,8 +200,7 @@ function runMailWorker(signal: AbortSignal): Promise<void>;
 ```ts
 interface TranslationView { id: TranslationId; name: string; copyrightNotice: string; availability: Availability; narration: Availability; }
 interface ChapterView { translationId: TranslationId; bookId: BookId; chapter: number; verseCount: number; contentSha256: string;
-  verses: { number: number; text: string }[]; headings: { beforeVerse: number; text: string }[]; footnotes: { verse: number; text: string }[];
-  expiresAt: IsoInstant | null; fums?: { token: string } }
+  verses: { number: number; text: string }[]; headings: { beforeVerse: number; text: string }[]; footnotes: { verse: number; text: string }[]; }
 interface RecordingView { id: Uuid; narratorId: string; narratorName: string; license: string; mediaUrl: string; mediaSha256: string; bytes: number;
   durationSeconds: number; timing: { status: 'verified'; verseStarts: number[] } | { status: 'absent' | 'rejected'; reason: string }; }
 
@@ -217,7 +215,7 @@ function getChapter(translationId: TranslationId, bookId: BookId, chapter: numbe
 function listRecordings(translationId: TranslationId, bookId: BookId, chapter: number): Promise<{ recordings: RecordingView[]; preparing: string[]; failed: { narratorId: string; reason: string }[] }>;
 // GET /media/:sha256 — byte ranges, immutable cache headers
 // GET /api/content/:translation/:book/:chapter/download-manifest[?narration=true] — no-store; asset urls are the chapter route and /media/:sha256
-function downloadManifest(translationId: TranslationId, bookId: BookId, chapter: number, withNarration: boolean): Promise<{ assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[]; totalBytes: number; expiresAt: IsoInstant | null }>;
+function downloadManifest(translationId: TranslationId, bookId: BookId, chapter: number, withNarration: boolean): Promise<{ assets: { url: string; sha256: string; bytes: number; kind: 'chapter' | 'audio' }[]; totalBytes: number }>;
 
 // pure
 function parseReference(input: string): PassageRef | null;   // 'Romans 3:12', 'rom 3', 'Romans 3:12-15'
@@ -368,7 +366,7 @@ type ConnectorToServer =
 
 ```ts
 type SaveState = 'saving' | 'saved_on_device' | 'pending_sync' | 'synced' | 'save_failed';
-type DownloadState = { state: 'absent' } | { state: 'downloading'; doneBytes: number; totalBytes: number } | { state: 'ready'; expiresAt: IsoInstant | null; withNarration: boolean }
+type DownloadState = { state: 'absent' } | { state: 'downloading'; doneBytes: number; totalBytes: number } | { state: 'ready'; withNarration: boolean }
   | { state: 'failed'; reason: string } | { state: 'expired' };
 
 function downloadChapter(userId: Uuid, ref: { translationId: TranslationId; bookId: BookId; chapter: number }, withNarration: boolean, signal: AbortSignal, onProgress?: (state: DownloadState) => void): Promise<DownloadState>;   // verifies length and sha256 before ready
@@ -459,7 +457,7 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 
 **content**
 - `narration_unavailable` (409): a download with narration asked for a chapter with no recording ready. Retry: yes while the narration is preparing, otherwise no. Offer text only.
-- `translation_unavailable` (409): `not_configured` or `unavailable`, with the reason. This includes a CSB chapter API.Bible could not supply (S13.4). Retry: no. Show the reason.
+- `translation_unavailable` (409): `unavailable`, with the reason, for example a translation not imported yet. Retry: no. Show the reason.
 - `chapter_not_found` (404): no such book or chapter. Retry: no.
 - `not_found` (404): a `/media/` request for a recording that is missing or not ready. Retry: no.
 - `preparing` is not an error: `listRecordings` answers 202 while a recording is fetched, and a fetch that fails is listed in `failed`.
@@ -507,8 +505,6 @@ Every API error is an `ApiError` with one of these codes. HTTP status is in pare
 
 ## Unresolved
 
-- **API.Bible Bible ID for CSB.** This is configuration (`APIBIBLE_CSB_BIBLE_ID`), not a signature, and is known only once the owner's access is granted.
-- **Reusing a cached Fair Use token.** S13 reports the token stored with the chapter on every display, including displays of a cached copy. The API.Bible fair-use guide does not say whether a token may be reported again; this is confirmed or changed once the owner's account is live.
 - **AgentConsole provider for the connector.**
   - `codex-cli` supports a `read-only` sandbox.
   - `claude-cli` supports none and relies on the deny-all permission policy.

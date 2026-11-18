@@ -1,10 +1,11 @@
-import type { ChapterContent, TranslationId } from '../../shared/api.ts';
+import type { TranslationId } from '../../shared/api.ts';
 import type { Clock } from '../platform/clock.ts';
-import type { Db } from '../platform/db.ts';
+import { withTransaction, type Db, type Tx } from '../platform/db.ts';
 import { uuidv7 } from '../platform/ids.ts';
 import { log } from '../platform/log.ts';
 import type { ContentSource } from './aolab.ts';
 import { contentHash, normalizeChapter, serializeContent } from './normalize.ts';
+import { plainText, servedContent, verseRef, type ChapterText } from './text.ts';
 
 export interface ImportScope {
   translationId: TranslationId;
@@ -25,7 +26,7 @@ export interface TextSource {
   translationId: TranslationId;
   kind: 'aolab' | 'files';
   catalog(): Promise<{ sha256: string; books: TextBook[] }>;
-  chapter(bookId: string, chapter: number): Promise<{ content: ChapterContent; sourceRef: string }>;
+  chapter(bookId: string, chapter: number): Promise<{ text: ChapterText; sourceRef: string }>;
 }
 
 export type ImportItem =
@@ -68,7 +69,7 @@ export function aolabText(source: ContentSource, translationId: 'BSB'): TextSour
       if (content.verses.length === 0 || content.verses.length !== raw.numberOfVerses) {
         throw new Error(`verse count ${content.verses.length} does not match the source's ${raw.numberOfVerses}`);
       }
-      return { content, sourceRef: raw.thisChapterLink };
+      return { text: plainText(content), sourceRef: raw.thisChapterLink };
     },
   };
 }
@@ -86,9 +87,9 @@ export function runImport(deps: ImportDeps, scope: ImportScope & { translationId
   return importText({ db: deps.db, clock: deps.clock, text: aolabText(deps.source, scope.translationId), concurrency: deps.concurrency }, scope);
 }
 
-// Imports a translation's text. A chapter row changes only when its content hash changes, so re-running against
-// an unchanged source writes nothing but a new manifest. An imported chapter never expires; it replaces a cached
-// CSB copy fetched from API.Bible.
+// Imports a translation's text. Each chapter is one transaction: its served copy in chapters, and its verses,
+// headings and notes rows, which are rewritten every time so they always match the source. The served copy changes
+// only when its content hash changes, so an unchanged chapter reports 'unchanged'.
 export async function importText(deps: TextImportDeps, scope: ImportScope): Promise<ImportManifestSummary> {
   const { db, clock, text } = deps;
   if (text.translationId !== scope.translationId) throw new Error(`The source holds ${text.translationId}, not ${scope.translationId}`);
@@ -138,20 +139,25 @@ async function importBooks(deps: TextImportDeps, scope: ImportScope, manifestId:
   const items: ImportItem[] = [];
   await eachLimited(work, deps.concurrency ?? 8, async ({ bookId, chapter }) => {
     try {
-      const { content, sourceRef } = await text.chapter(bookId, chapter);
+      const { text: chapterText, sourceRef } = await text.chapter(bookId, chapter);
+      const content = servedContent(chapterText);
       const verseCount = content.verses[content.verses.length - 1].number;
       const serialized = serializeContent(content);
       const sha = contentHash(serialized);
-      const result = await db.query<{ inserted: boolean }>(
-        `INSERT INTO chapters (translation_id, book_id, chapter, verse_count, content, content_sha256, source_ref, fetched_at, expires_at, fums_token)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
-         ON CONFLICT (translation_id, book_id, chapter) DO UPDATE
-           SET verse_count = excluded.verse_count, content = excluded.content, content_sha256 = excluded.content_sha256,
-               source_ref = excluded.source_ref, fetched_at = excluded.fetched_at, expires_at = NULL, fums_token = NULL
-         WHERE chapters.content_sha256 <> excluded.content_sha256 OR chapters.expires_at IS NOT NULL
-         RETURNING (xmax = 0) AS inserted`,
-        [scope.translationId, bookId, chapter, verseCount, serialized, sha, sourceRef, clock.now()],
-      );
+      const result = await withTransaction(db, async (tx) => {
+        const upsert = await tx.query<{ inserted: boolean }>(
+          `INSERT INTO chapters (translation_id, book_id, chapter, verse_count, content, content_sha256, source_ref, fetched_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (translation_id, book_id, chapter) DO UPDATE
+             SET verse_count = excluded.verse_count, content = excluded.content, content_sha256 = excluded.content_sha256,
+                 source_ref = excluded.source_ref, fetched_at = excluded.fetched_at
+           WHERE chapters.content_sha256 <> excluded.content_sha256
+           RETURNING (xmax = 0) AS inserted`,
+          [scope.translationId, bookId, chapter, verseCount, serialized, sha, sourceRef, clock.now()],
+        );
+        await writeText(tx, scope.translationId, bookId, chapter, chapterText);
+        return upsert;
+      });
       const status = result.rows.length === 0 ? 'unchanged' : result.rows[0].inserted ? 'inserted' : 'updated';
       items.push({ bookId, chapter, status, contentSha256: sha, verseCount });
     } catch (error) {
@@ -175,4 +181,32 @@ async function importBooks(deps: TextImportDeps, scope: ImportScope, manifestId:
   }
   await db.query(`UPDATE import_manifests SET finished_at = $2, items = $3, status = $4 WHERE id = $1`, [manifestId, clock.now(), JSON.stringify(items), status]);
   return { manifestId, status, sourceSha256, counts, items };
+}
+
+// Replaces a chapter's verses, headings and notes rows.
+async function writeText(tx: Tx, translationId: TranslationId, bookId: string, chapter: number, text: ChapterText): Promise<void> {
+  const key = [translationId, bookId, chapter];
+  for (const table of ['verses', 'headings', 'verse_notes']) {
+    await tx.query(`DELETE FROM ${table} WHERE translation_id = $1 AND book_id = $2 AND chapter = $3`, key);
+  }
+  const ref = (verse: number) => verseRef(bookId, chapter, verse);
+  await tx.query(
+    `INSERT INTO verses (translation_id, ref, book_id, chapter, verse, text)
+     SELECT $1, v.ref, $2, $3, v.verse, v.text FROM unnest($4::int[], $5::int[], $6::text[]) AS v(ref, verse, text)`,
+    [...key, text.verses.map((v) => ref(v.number)), text.verses.map((v) => v.number), text.verses.map((v) => v.text)],
+  );
+  if (text.headings.length > 0) {
+    await tx.query(
+      `INSERT INTO headings (translation_id, book_id, chapter, seq, ref, level, text)
+       SELECT $1, $2, $3, h.seq, h.ref, h.level, h.text FROM unnest($4::int[], $5::int[], $6::int[], $7::text[]) AS h(seq, ref, level, text)`,
+      [...key, text.headings.map((_, i) => i + 1), text.headings.map((h) => ref(h.beforeVerse)), text.headings.map((h) => h.level), text.headings.map((h) => h.text)],
+    );
+  }
+  if (text.notes.length > 0) {
+    await tx.query(
+      `INSERT INTO verse_notes (translation_id, book_id, chapter, seq, ref, kind, text, passage)
+       SELECT $1, $2, $3, n.seq, n.ref, n.kind, n.text, n.passage FROM unnest($4::int[], $5::int[], $6::text[], $7::text[], $8::text[]) AS n(seq, ref, kind, text, passage)`,
+      [...key, text.notes.map((_, i) => i + 1), text.notes.map((n) => ref(n.verse)), text.notes.map((n) => n.kind), text.notes.map((n) => n.text), text.notes.map((n) => n.passage)],
+    );
+  }
 }

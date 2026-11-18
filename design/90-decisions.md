@@ -7,6 +7,13 @@ Append-only. Newest at the top. The rejected alternatives are the point — with
 
 ---
 
+### 2026-11-17 — Scripture in verse tables; API.Bible removed
+- **Context:** The owner has the CSB and ESV files and asked to drop the API key path, and to keep the text in Postgres as content, chapters and verses. The text will rarely if ever change.
+- **Chosen:** Remove API.Bible (client, Fair Use reporting, `APIBIBLE_*`, `not_configured`, `expires_at`, `fums_token`). Add `canon`, `verses` (`BBCCCVVV` ref, full-text search), `headings` (with level) and `verse_notes` (footnote or cross reference). `chapters.content` stays the served copy. Each import rewrites a chapter and its rows in one transaction. See [ADR-0008](../docs/decisions/0008-verse-tables.md).
+- **Rejected:** dropping `chapters.content` and serving from the rows. It would change every served hash and break existing offline copies for no gain.
+- **Rejected:** a per-word or Strong's model. The sources do not carry it.
+- **Supersedes:** D-2026-10-30-04, the 2026-10-31 S13 API.Bible decision, and every API.Bible clause in the 2026-11-01 and 2026-11-09 CSB entries.
+
 ### 2026-11-10 — The hostname is biblestudy.subzerodev.com
 - **Context:** The open question of the hostname, and who adds its DNS record and proxy route, was settled by the deployment itself.
 - **Chosen:** `biblestudy.subzerodev.com`, with the DNS record and the reverse-proxy route to `biblestudy-app:3000` added by the owner. It is the `PUBLIC_URL` repository variable, and it served build `9d58860` with `/__health` 200 on 2026-11-10.

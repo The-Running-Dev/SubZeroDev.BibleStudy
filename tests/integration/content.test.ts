@@ -298,20 +298,20 @@ describe('Romans imported live from AO Lab', () => {
     assert.equal(second.body, '');
   });
 
-  test('S2.7 BSB is available and CSB is not configured; CSB never serves text', async () => {
+  test('S2.7 BSB is available and CSB is not imported yet; CSB serves no text', async () => {
     const translations = (await get('/api/content/translations')).json();
     assert.deepEqual(
       translations.map((t: { id: string; availability: unknown }) => [t.id, t.availability]),
       [
         ['BSB', { state: 'available' }],
-        ['CSB', { state: 'not_configured', reason: "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY)." }],
+        ['CSB', { state: 'unavailable', reason: 'CSB text has not been imported yet. Run import-content --translation CSB --from <CSB folder>.' }],
         ['ESV', { state: 'unavailable', reason: 'ESV text has not been imported yet. Run import-content --translation ESV --from <ESV folder>.' }],
       ],
     );
     const csb = await get('/api/content/CSB/ROM/1');
     assert.equal(csb.statusCode, 409);
     assert.equal(csb.json().error, 'translation_unavailable');
-    assert.equal(csb.json().message, "CSB needs the owner's CSB files (import-content --translation CSB) or API.Bible key (APIBIBLE_KEY).");
+    assert.equal(csb.json().message, 'CSB text has not been imported yet. Run import-content --translation CSB --from <CSB folder>.');
     assert.equal((await get('/api/content/books?translation=CSB')).statusCode, 409);
   });
 
@@ -358,7 +358,7 @@ describe("CSB imported from the owner's files", () => {
     await h.db.query(`DELETE FROM books WHERE translation_id = 'CSB'`);
   });
 
-  test('an imported CSB chapter is served without API.Bible and never expires', async () => {
+  test('an imported CSB chapter is served and kept', async () => {
     const summary = await importCsb();
     assert.equal(summary.status, 'succeeded');
     assert.deepEqual(summary.counts, { inserted: 1, updated: 0, unchanged: 0, failed: 0 });
@@ -367,11 +367,11 @@ describe("CSB imported from the owner's files", () => {
     assert.deepEqual(csb.availability, { state: 'available' });
     assert.deepEqual((await get('/api/content/books?translation=CSB')).json(), [{ bookId: 'PHM', name: 'Philemon', chapters: 1 }]);
 
-    h.clock.set('2026-11-21T12:00:00Z'); // past an API.Bible copy's 14 days
+    h.clock.set('2026-11-21T12:00:00Z'); // imported text has no expiry
     const chapter = await get('/api/content/CSB/PHM/1');
     assert.equal(chapter.statusCode, 200);
     const view = chapter.json();
-    assert.equal(view.expiresAt, null);
+    assert.equal(view.expiresAt, undefined);
     assert.deepEqual(view.verses, [
       { number: 1, text: 'Fixture verse one.' },
       { number: 2, text: 'Fixture verse two.' },

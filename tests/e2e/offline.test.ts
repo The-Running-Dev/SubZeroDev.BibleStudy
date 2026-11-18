@@ -14,6 +14,7 @@ import { runImport } from '../../src/server/content/import.ts';
 import { importAudio } from '../../src/server/content/narration.ts';
 import { formatBytes } from '../../src/client/offline.ts';
 import type { Harness } from '../support/harness.ts';
+import { withSyntheticTiming } from '../support/synthetic-timing.ts';
 import { clearMailbox, signIn, startHarness } from '../support/harness.ts';
 
 const aoLabUrl = process.env.AOLAB_BASE_URL ?? 'https://bible.helloao.org';
@@ -33,7 +34,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${(h.app.server.address() as AddressInfo).port}`;
   await clearMailbox();
   h.clock.set('2026-11-01T12:00:00Z');
-  const source = createAoLabSource({ baseUrl: aoLabUrl });
+  const source = withSyntheticTiming(createAoLabSource({ baseUrl: aoLabUrl }));
   assert.equal((await runImport({ db: h.db, clock: h.clock, source }, { translationId: 'BSB', books: ['ROM'] })).status, 'succeeded');
   const audio = await importAudio({ db: h.db, clock: h.clock, source, mediaDir: h.config.mediaDir }, { translationId: 'BSB', bookId: 'ROM', chapters: [1] });
   assert.equal(audio.status, 'succeeded');
@@ -207,7 +208,7 @@ describe('installing and reading offline (S14)', () => {
     }
   });
 
-  test('an expired download keeps no chapter text or audio on the device, only its listing', async () => {
+  test('a legacy expired download (API.Bible CSB) keeps no chapter text or audio on the device, only its listing', async () => {
     const context = await browser.newContext(mobile);
     try {
       const page = await open(context);

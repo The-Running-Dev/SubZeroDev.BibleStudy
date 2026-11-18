@@ -60,7 +60,6 @@ const translations: TranslationView[] = ['BSB', 'CSB'].map((id) => ({
       ? { state: 'available' }
       : { state: 'unavailable', reason: 'No licensed CSB recording.' },
 }));
-let expiresAt: string | null;
 let restrictedToUserId: string | undefined;
 let corruptText: boolean;
 let holdAudio: boolean;
@@ -73,13 +72,12 @@ let browser: Browser;
 
 function chapter(translationId: 'BSB' | 'CSB', n: number): ChapterView {
   return {
-    ...(translationId === 'CSB' && expiresAt === null && restrictedToUserId ? { restrictedToUserId } : {}),
+    ...(translationId === 'CSB' && restrictedToUserId ? { restrictedToUserId } : {}),
     translationId,
     bookId: 'ROM',
     chapter: n,
     verseCount: 3,
     contentSha256: '0'.repeat(64),
-    expiresAt: translationId === 'CSB' ? expiresAt : null,
     verses: [1, 2, 3].map((number) => ({
       number,
       text: `Synthetic verse ${number} of chapter ${n}.`,
@@ -163,10 +161,9 @@ before(async () => {
         if (url.searchParams.get('narration') === 'true')
           assets.push({ url: mediaUrl, sha256: sha(audio), bytes: audio.length, kind: 'audio' });
         return void json({
-          ...(translation === 'CSB' && expiresAt === null && restrictedToUserId ? { restrictedToUserId } : {}),
+          ...(translation === 'CSB' && restrictedToUserId ? { restrictedToUserId } : {}),
           assets,
           totalBytes: assets.reduce((n, a) => n + a.bytes, 0),
-          expiresAt: translation === 'CSB' ? expiresAt : null,
         });
       }
       if (!match[3]) {
@@ -221,7 +218,6 @@ after(async () => {
   await new Promise<void>((resolve) => server?.close(() => resolve()));
 });
 beforeEach(() => {
-  expiresAt = new Date(Date.now() + 86_400_000).toISOString();
   restrictedToUserId = undefined;
   corruptText = false;
   holdAudio = false;
@@ -505,58 +501,6 @@ describe('S14 download integrity and offline browser regressions', () => {
     }
   });
 
-  test("CSB without an expiration (imported from the owner's files) is kept offline", async () => {
-    restrictedToUserId = userId;
-    const context = await browser.newContext(mobile);
-    try {
-      expiresAt = null;
-      const page = await open(context);
-      await page.getByLabel('Translation', { exact: true }).selectOption('CSB');
-      await page.locator('.verse').first().waitFor();
-      await start(page, false);
-      await page.getByText('Downloaded — readable offline.').waitFor();
-      assert.equal((await stored(page)).downloads.length, 1);
-    } finally {
-      await context.close();
-    }
-  });
-
-  test('CSB expires in an already open offline reader: text and downloaded bytes are removed', async () => {
-    const context = await browser.newContext(mobile);
-    try {
-      const page = await open(context);
-      await page.clock.install();
-      expiresAt = new Date(Date.now() + 60_000).toISOString();
-      await page.getByLabel('Translation', { exact: true }).selectOption('CSB');
-      await page.locator('.verse').first().waitFor();
-      await start(page, false);
-      await page.getByText('Downloaded — readable offline.').waitFor();
-      await context.setOffline(true);
-      await page.reload();
-      await page.getByLabel('Translation', { exact: true }).selectOption('CSB');
-      await page.getByText('Reading the copy downloaded to this device.').waitFor();
-      await page.clock.fastForward(61_000);
-      await page
-        .getByText('The download of this chapter has expired — connect to download it again.')
-        .waitFor();
-      assert.equal(await page.locator('.verse').count(), 0);
-      await page.waitForFunction(async () => {
-        const db = await new Promise<IDBDatabase>((resolve) => {
-          const r = indexedDB.open('biblestudy', 1);
-          r.onsuccess = () => resolve(r.result);
-        });
-        const records = await new Promise<{ chapterBody: string }[]>((resolve) => {
-          const r = db.transaction('downloads').objectStore('downloads').getAll();
-          r.onsuccess = () => resolve(r.result);
-        });
-        db.close();
-        return records.length === 1 && records[0].chapterBody === '';
-      });
-    } finally {
-      await context.close();
-    }
-  });
-
   test('removing a narrated download offline preserves notes and pending operations through reload', async () => {
     const context = await browser.newContext(mobile);
     try {
@@ -592,7 +536,6 @@ describe('S14 download integrity and offline browser regressions', () => {
 describe('shared imported CSB offline reading', () => {
   for (const scope of [undefined, userId, 'some-other-account']) {
     test(`an imported download remains readable offline with ${scope === undefined ? 'no account restriction' : 'legacy scope ' + scope}`, async () => {
-      expiresAt = null;
       // New responses have no scope; old response bodies may still contain one. Neither restricts shared text.
       restrictedToUserId = scope;
       const context = await browser.newContext(mobile);

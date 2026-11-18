@@ -36,3 +36,5 @@ This revision supersedes the earlier licensing-approval checklist and any assump
 A server cannot recall files someone already copied. An old client remains subject to its old behavior until updated; the updated client purges legacy unscoped downloads on access. Authorized owner downloads remain offline-readable after server configuration changes: there is no remote revocation while disconnected. The account scope is an application boundary, not encryption/DRM against someone controlling their own browser storage.
 
 Every merge to main automatically runs the image drill, publishes the image and requests the Portainer redeploy. Before claiming deployed protection, verify `/__build-id`, update installed clients, then exercise the account matrix with synthetic text. Inspect production import/configuration state privately. Passing CI or a successful webhook alone does not establish the running account boundary.
+
+API.Bible was later removed: see [ADR-0008](0008-verse-tables.md).

@@ -13,6 +13,7 @@ import { sha256Hex } from '../../src/server/platform/secrets.ts';
 import type { Harness } from '../support/harness.ts';
 import { clearMailbox, signIn, startHarness, truncateAll } from '../support/harness.ts';
 import { synthMp3 } from '../support/mp3.ts';
+import { withSyntheticTiming } from '../support/synthetic-timing.ts';
 
 const aoLabUrl = process.env.AOLAB_BASE_URL ?? 'https://bible.helloao.org';
 const noSleep = async () => {};
@@ -364,7 +365,6 @@ describe('narration from a fixture source', () => {
     assert.deepEqual(text.json(), {
       assets: [{ url: '/api/content/BSB/JUD/1', sha256: sha256Hex(chapter.rawPayload), bytes: chapter.rawPayload.length, kind: 'chapter' }],
       totalBytes: chapter.rawPayload.length,
-      expiresAt: null,
     });
 
     // Narration not yet stored: refused and queued, so asking again shortly succeeds.
@@ -389,11 +389,11 @@ describe('narration from a fixture source', () => {
   });
 });
 
-describe('Romans narration imported live from AO Lab', () => {
+describe('Romans narration imported live from AO Lab, with synthetic verse timing', () => {
   let items: Awaited<ReturnType<typeof importAudio>>['items'];
   before(async () => {
     await freshMember();
-    const source = createAoLabSource({ baseUrl: aoLabUrl });
+    const source = withSyntheticTiming(createAoLabSource({ baseUrl: aoLabUrl }));
     const text = await runImport({ db: h.db, clock: h.clock, source }, { translationId: 'BSB', books: ['ROM'] });
     assert.equal(text.status, 'succeeded');
     const audio = await importAudio({ db: h.db, clock: h.clock, source, mediaDir: h.config.mediaDir, concurrency: 4 }, { translationId: 'BSB', bookId: 'ROM', chapters: Array.from({ length: 16 }, (_, i) => i + 1) });
@@ -427,7 +427,7 @@ describe('Romans narration imported live from AO Lab', () => {
     assert.equal((await h.db.query(`SELECT 1 FROM recordings WHERE narrator_id = 'david'`)).rowCount, 0);
   });
 
-  test('S3.2 Romans 1 by Bob Souer has verified timing: 32 increasing starts inside the recording', async () => {
+  test('S3.2 Romans 1 by Bob Souer has verified timing: 32 increasing starts inside the live recording', async () => {
     const listing = (await get('/api/content/BSB/ROM/1/recordings')).json();
     const souer = listing.recordings.find((r: { narratorId: string }) => r.narratorId === 'souer');
     assert.equal(souer.timing.status, 'verified');

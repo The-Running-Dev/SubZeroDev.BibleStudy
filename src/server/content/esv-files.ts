@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChapterContent } from '../../shared/api.ts';
 import { books as canon } from '../../shared/books.ts';
 import type { TextBook, TextSource } from './import.ts';
+import type { ChapterText } from './text.ts';
 
 const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const object = (value: unknown): Record<string, unknown> => {
@@ -25,14 +25,17 @@ const positive = (value: unknown): number => {
 
 // Download-CSBBible and Download-ESVBible keep different formats. This adapter consumes only the ESV
 // downloader's JSON; it neither fetches ESV.org nor needs the accompanying raw HTML files at runtime.
-export function parseEsvChapter(value: unknown, bookNumber: number, chapterNumber: number): ChapterContent {
+export function parseEsvChapter(value: unknown, bookNumber: number, chapterNumber: number): ChapterText {
   const data = object(value);
   if (data.SchemaVersion !== 1 || data.Translation !== 'ESV') throw new Error('expected ESV chapter schema version 1');
   if (data.BookNumber !== bookNumber || data.Chapter !== chapterNumber) throw new Error(`chapter metadata does not match book ${bookNumber}, chapter ${chapterNumber}`);
-  const footnotes: ChapterContent['footnotes'] = [];
+  const found: ChapterText['notes'] = [];
   const notes = (owner: Record<string, unknown>, verse: number) => {
-    for (const note of array(owner.Footnotes)) footnotes.push({ verse, text: text(object(note).Text) });
-    for (const ref of array(owner.CrossReferences)) footnotes.push({ verse, text: `Cross-reference: ${text(object(ref).Text)}` });
+    for (const note of array(owner.Footnotes)) found.push({ verse, kind: 'footnote', text: text(object(note).Text), passage: null });
+    for (const value of array(owner.CrossReferences)) {
+      const ref = object(value);
+      found.push({ verse, kind: 'crossref', text: text(ref.Text), passage: typeof ref.Passage === 'string' && ref.Passage.trim() ? ref.Passage : null });
+    }
   };
   let previous = 0;
   const verses = array(data.Verses).map((value) => {
@@ -50,9 +53,10 @@ export function parseEsvChapter(value: unknown, bookNumber: number, chapterNumbe
     const beforeVerse = positive(heading.BeforeVerse);
     if (!verses.some((v) => v.number === beforeVerse)) throw new Error(`heading refers to missing verse ${beforeVerse}`);
     notes(heading, beforeVerse);
-    return { beforeVerse, text: text(heading.Text) };
+    const level = typeof heading.Level === 'number' && Number.isSafeInteger(heading.Level) && heading.Level > 0 ? heading.Level : null;
+    return { beforeVerse, level, text: text(heading.Text) };
   });
-  return { verses, headings, footnotes };
+  return { verses, headings, notes: found };
 }
 
 export function createEsvFileSource(dir: string): TextSource {
@@ -92,7 +96,7 @@ export function createEsvFileSource(dir: string): TextSource {
       if (!file) throw new Error(`${bookId} ${chapter}: no chapter file (call catalog first)`);
       try {
         return {
-          content: parseEsvChapter(JSON.parse(await readFile(file.path, 'utf8')), file.bookNumber, file.chapter),
+          text: parseEsvChapter(JSON.parse(await readFile(file.path, 'utf8')), file.bookNumber, file.chapter),
           sourceRef: `esv-file:${file.name}`,
         };
       } catch (error) {
