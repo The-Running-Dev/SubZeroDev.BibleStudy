@@ -87,6 +87,7 @@ Each needs something only the owner can provide. Nothing here was replaced by a 
 - No built-in voice (DOD-08); the group uses its own call.
 - CSB has no narration: no licensed CSB recording exists. A CSB study runs as reading together, with any member marking the verse.
 - Imported text (BSB, CSB, ESV) never expires and needs no key.
+- Since 2026-11-17 AO Lab publishes no verse timing for any BSB chapter, so newly imported recordings have absent timing: they play the whole chapter without verse following or range play (S3.6). The live narration tests keep AO Lab's real chapters and recordings and use synthetic timing (`tests/support/synthetic-timing.ts`).
 - The owner's CSB files leave out the 16 New Testament verses that modern texts omit (for example Matthew 17:21); the reader shows those chapters without them.
 - One group per instance. The data model is keyed by group, so a second group needs no migration, but there is no UI for it.
 - The study assistant is the owner's alone and needs their PC on with the connector running.

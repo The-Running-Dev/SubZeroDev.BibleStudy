@@ -12,6 +12,7 @@ import { runImport } from '../../src/server/content/import.ts';
 import { importAudio } from '../../src/server/content/narration.ts';
 import type { DriftReport } from '../../src/shared/api.ts';
 import type { Harness } from '../support/harness.ts';
+import { withSyntheticTiming } from '../support/synthetic-timing.ts';
 import { clearMailbox, ownerEmail, signIn, startHarness } from '../support/harness.ts';
 
 const aoLabUrl = process.env.AOLAB_BASE_URL ?? 'https://bible.helloao.org';
@@ -28,7 +29,7 @@ before(async () => {
   await h.app.listen({ port: 0, host: '127.0.0.1' });
   baseUrl = `http://127.0.0.1:${(h.app.server.address() as AddressInfo).port}`;
   await clearMailbox();
-  const source = createAoLabSource({ baseUrl: aoLabUrl });
+  const source = withSyntheticTiming(createAoLabSource({ baseUrl: aoLabUrl }));
   assert.equal((await runImport({ db: h.db, clock: h.clock, source }, { translationId: 'BSB', books: ['ROM'] })).status, 'succeeded');
   const audio = await importAudio({ db: h.db, clock: h.clock, source, mediaDir: h.config.mediaDir }, { translationId: 'BSB', bookId: 'ROM', chapters: [1] });
   assert.equal(audio.status, 'succeeded');
